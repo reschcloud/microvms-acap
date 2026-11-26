@@ -9,7 +9,7 @@ Ein kleines VMS direkt in der Weboberfläche der Kamera:
 - **Timeline** der Edge-Storage-Aufzeichnungen (SD-Karte / NAS) mit Kalendertagen, Zoom (Mausrad), Verschieben (Ziehen) und direktem Sprung zu Datum/Uhrzeit
   - Getrennte Spuren: Daueraufzeichnung (blau), Ereignis (orange), Zeitplan (lila); ein Klick auf einen orangefarbenen Abschnitt öffnet den Ereignisclip auch bei gleichzeitiger Daueraufnahme.
   - Klick auf die Timeline → Wiedergabe ab diesem Zeitpunkt, automatischer Sprung in die nächste Aufzeichnung
-  - ±30 s, Pause (Pause im Live-Modus = Timeshift: „Weiter“ spielt ab dem Pausenzeitpunkt aus der Aufzeichnung)
+  - ±30 s, −5 s, Pause (Pause im Live-Modus = Timeshift: „Weiter“ spielt ab dem Pausenzeitpunkt aus der Aufzeichnung); Bedienelemente mit Inline-SVG-Icons
 - **Clip sichern**: letzte 30 Sekunden bis zum aktuellen Live-/Wiedergabezeitpunkt oder einen Zeitraum wählen. Vor dem Download zeigt Micro VMS die Aufnahmelücken und die Anzahl der Teile. Die Kamera kann Ausschnitte am vorherigen Keyframe beginnen; exportiertes Material kann daher vor dem gewählten Start liegen.
   - Liegt der Zeitraum über mehreren Aufzeichnungen (Unterbrechung, Neustart, Ereignisaufzeichnungen), lädt der Browser die Teil-Exporte nacheinander und fügt sie ohne Neukodierung zu einer Datei zusammen (`html/mkvconcat.js`): fortlaufende Zeitstempel, Lücken übersprungen, mit Dauer, Aufnahmedatum und Index (Cues) → in VLC & Co. normal spulbar
   - Fortschrittsanzeige und Abbrechen
@@ -20,7 +20,7 @@ Ein kleines VMS direkt in der Weboberfläche der Kamera:
   - Klick ins Livebild zentriert, Mausrad zoomt auf die Mausposition; Tastatur: Pfeiltasten, + / −
   - Nur in der Live-Ansicht aktiv; bei Fokusverlust/Tabwechsel wird jede Bewegung sofort gestoppt
   - Bedienelemente, die das Gerät laut `ptz.cgi?info=1` nicht kann, werden ausgeblendet
-- **Aufnahmestatus** am Livebild: „Aufnahme läuft“ nur bei einer von der Kamera als laufend gemeldeten Aufnahme. Ein klassisches Daueraufnahmeprofil allein gilt als „konfiguriert“. Dort und in der Speicheranzeige steht auch, wenn die SD-Karte nicht beschreibbar ist.
+- **Aufnahmestatus** am Livebild: „Aufnahme läuft“ nur bei einer von der Kamera als laufend gemeldeten Aufnahme. Ein klassisches Daueraufnahmeprofil allein gilt als „konfiguriert“. Dort und in der Speicheranzeige steht auch, wenn die SD-Karte nicht beschreibbar ist. Eine Daueraufzeichnung lässt sich in der Seitenleiste für den gewählten Kanal starten und wieder beenden (Profil wird entfernt).
 
 Kein eigener Server-Prozess: Die Oberfläche spricht direkt die VAPIX-APIs der Kamera an (gleiche Origin, die Anmeldung an der Kamera wird mitverwendet).
 
@@ -33,7 +33,7 @@ Kein eigener Server-Prozess: Die Oberfläche spricht direkt die VAPIX-APIs der K
 | Stream-Profile | `/axis-cgi/streamprofile.cgi` (`list`) → `streamprofile=…` |
 | Speicher | `/axis-cgi/disks/list.cgi` |
 | PTZ | `/axis-cgi/com/ptz.cgi`, Rechte: `/axis-cgi/usergroup.cgi`, `param.cgi?…Properties.PTZ.PTZ` |
-| Daueraufzeichnung | `/axis-cgi/record/continuous/listconfiguration.cgi`, `addconfiguration.cgi` |
+| Daueraufzeichnung | `/axis-cgi/record/continuous/listconfiguration.cgi`, `addconfiguration.cgi`, `removeconfiguration.cgi` |
 
 Das Streaming nutzt Axis' MIT-lizenzierte [media-stream-library-js](https://github.com/AxisCommunications/media-stream-library-js) (v13.3.3, im Paket enthalten unter `html/vendor/`).
 
@@ -111,7 +111,7 @@ microvms-acap/
 - Audio ist deaktiviert (`audio=0`), damit Kameras mit G.711/Opus nicht an MSE scheitern.
 - Neuere AXIS OS (12+) können Aufzeichnungen über *Aufzeichnungsgruppen* verwalten. Liste/Wiedergabe/Export funktionieren weiterhin über die obigen APIs, die Anzeige „Daueraufzeichnung“ bezieht sich aber nur auf die klassische Continuous-Recording-API.
 - Die Timeline zählt separat gemeldete Ereignisclips, nicht einzelne Auslösungen innerhalb einer gruppierten Daueraufnahme. Wenn AXIS OS mehrere Aktionen in einer Aufnahme zusammenfasst und dafür keine separaten Clips meldet, lassen sich daraus keine Ereigniszeitpunkte ableiten.
-- Zugriff: Die Seite ist für angemeldete Kamera-Benutzer erreichbar; „Daueraufzeichnung aktivieren“ braucht Operator- oder Admin-Rechte.
+- Zugriff: Die Seite ist für angemeldete Kamera-Benutzer erreichbar; Starten und Beenden der Daueraufzeichnung brauchen Operator- oder Admin-Rechte.
 - PTZ folgt dem gewählten Kanal. Falls `usergroup.cgi` fehlt, prüft die App die Berechtigung ersatzweise per Positionsabfrage für Kanal 1. Je nach Firmware kann dabei einmal ein Anmeldedialog erscheinen.
 - Mehrkanal: Nummerierte Quellen werden nur zugeordnet, wenn die Antwort Hinweise auf 0- oder 1-basierte Nummerierung liefert. `Quad` und mehrdeutige Quellen werden nicht als Aufnahmen eines nummerierten Kanals ausgegeben. Für die klassische Daueraufzeichnung sendet die App `camera=N` in den Stream-Optionen; das muss auf der jeweiligen Firmware geprüft werden.
 - Die `vendorId` im Manifest ist ein Platzhalter.

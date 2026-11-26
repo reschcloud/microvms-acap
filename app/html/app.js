@@ -23,6 +23,7 @@
   const DAY = 24 * HOUR;
   const LIVE_THRESHOLD = 5000;   // click closer than 5 s to "now" => live
   const SKIP = 30 * 1000;
+  const SKIP_SHORT = 5 * 1000;
   const PAGE_SIZE = 5000;   // one request covers a normal day; larger ranges page below
   const MAX_PAGES = 10;
   const STORE = 'minivms.';       // preserve preferences on the same camera origin
@@ -603,6 +604,17 @@
     setStreamStatus('playing');
   });
 
+  /**
+   * Jump back from the time currently on screen. From live view the target
+   * must be clearly before "now", otherwise playAt() would just go live again.
+   */
+  function skipBack(seconds) {
+    const live = state.mode === 'live' && state.pendingSeek == null;
+    const from = state.pendingSeek ?? currentWall();
+    const target = from - seconds;
+    playAt(live ? Math.min(target, Date.now() - LIVE_THRESHOLD - 1000) : target, { reuseManual: true });
+  }
+
   function togglePause() {
     if (state.pendingSeek != null) {
       const time = state.pendingSeek;
@@ -634,14 +646,14 @@
     badge.textContent = t(`badge.${key}`);
     $('manualSourceInfo').textContent = state.manualRecording ? t('video.manualSource') : '';
     $('manualSourceInfo').classList.toggle('hidden', !state.manualRecording);
-    $('btnPause').textContent = paused ? '▶' : '⏸';
+    $('pauseIcon').setAttribute('href', paused ? '#ic-play' : '#ic-pause');
     $('btnFwd').disabled = live;
     $('btnSnapshot').disabled = !live || !playing;
     $('btnRetryPlayback').classList.toggle('hidden', seeking || state.mode !== 'playback' || state.streamStatus !== 'error');
     const lb = $('btnLive');
     lb.disabled = live && playing;
     lb.classList.toggle('is-live', lb.disabled);
-    lb.textContent = live ? t(playing ? 'live.btn' : 'live.retry') : t('live.back');
+    $('liveLabel').textContent = live ? t(playing ? 'live.btn' : 'live.retry') : t('live.back');
     const mode = live && !playing ? state.streamStatus : seeking ? 'seeking' : state.mode;
     if (mode !== announcedMode) {
       announcedMode = mode;
@@ -1166,6 +1178,7 @@
   let activeRecording;
   let activeRequest;
   let enablingRecording = false;
+  let disablingRecording = false;
   let setupDenied = false;
 
   /** Channel a config records: "camera=N" in its options, otherwise channel 1. */
@@ -1228,7 +1241,8 @@
       : mine.length ? 'rec.configured'
       : activeRecording.unknown ? 'rec.statusUnknown' : 'rec.notRunning';
     const message = t(key, { disks: activeDisks });
-    const setup = enablingRecording ? 'rec.saving'
+    const setup = disablingRecording ? 'rec.disabling'
+      : enablingRecording ? 'rec.saving'
       : setupDenied || state.storageState === 'forbidden' ? 'rec.needsRights'
       : state.storageState === 'unknown' ? 'rec.noStorageAccess'
       : connected && connected.length === 0 ? 'rec.setupDisk'
@@ -1242,6 +1256,9 @@
     const canEnable = Boolean(writable && recConfigs && !mine.length && !active && activeRecording && !activeRecording.unknown && !setupDenied);
     $('recEnableRow').classList.toggle('hidden', !canEnable && !enablingRecording);
     $('btnEnableRec').disabled = $('recDisk').disabled = enablingRecording;
+    // A profile can always be removed, even if the channel is currently recording.
+    $('recDisableRow').classList.toggle('hidden', !(recConfigs && mine.length) && !disablingRecording);
+    $('btnDisableRec').disabled = disablingRecording || enablingRecording;
   }
 
   async function enableContinuous() {
@@ -1270,6 +1287,41 @@
     }
   }
 
+  /** Remove the continuous recording profile(s) of the selected channel. */
+  async function disableContinuous() {
+    if (disablingRecording || !recConfigs) return;
+    const mine = recConfigs.filter((c) => configChannel(c) === state.channel);
+    const profiles = [...new Set(mine.map((c) => c.profile))].filter((p) => p != null && p !== '');
+    if (!profiles.length) { toast(t('rec.disableFailed', { msg: t('rec.unknownResponse') }), true); return; }
+    if (!confirm(t('rec.disable.confirm'))) return;
+    disablingRecording = true;
+    renderRecordingConfig();
+    const errors = [];
+    try {
+      for (const profile of profiles) {
+        try {
+          const p = new URLSearchParams({ profile });
+          const doc = await fetchXml(`/axis-cgi/record/continuous/removeconfiguration.cgi?${p}`);
+          const removed = doc.getElementsByTagName('remove')[0];
+          if (!removed || removed.getAttribute('result') !== 'OK') {
+            errors.push(removed?.getAttribute('errormsg') || t('rec.unknownResponse'));
+          }
+        } catch (e) {
+          if (e.status === 401 || e.status === 403) setupDenied = true;
+          errors.push(e.message);
+        }
+      }
+      if (errors.length) toast(t('rec.disableFailed', { msg: errors.join('; ') }), true);
+      else toast(t('rec.disabled'));
+    } finally {
+      await loadRecordingConfig();
+      disablingRecording = false;
+      renderRecordingConfig();
+      refreshActiveRecording();
+      setTimeout(() => { refreshRecordings(true); refreshActiveRecording(); }, 3000);
+    }
+  }
+
   // ------------------------------------------------------------ Wiring
 
   $('btnLive').addEventListener('click', () => {
@@ -1278,7 +1330,8 @@
     if (now < state.viewStart || now > state.viewEnd) showDay(startOfDay(now));
   });
   $('btnPause').addEventListener('click', togglePause);
-  $('btnBack').addEventListener('click', () => playAt((state.pendingSeek ?? currentWall()) - SKIP, { reuseManual: true }));
+  $('btnBack').addEventListener('click', () => skipBack(SKIP));
+  $('btnBack5').addEventListener('click', () => skipBack(SKIP_SHORT));
   $('btnFwd').addEventListener('click', () => playAt((state.pendingSeek ?? currentWall()) + SKIP, { reuseManual: true }));
   $('btnRetryPlayback').addEventListener('click', () => playAt(currentWall(), { reuseManual: true }));
   $('btnSnapshot').addEventListener('click', () => {
@@ -1344,6 +1397,7 @@
     draw();
   });
   $('btnEnableRec').addEventListener('click', enableContinuous);
+  $('btnDisableRec').addEventListener('click', disableContinuous);
 
   document.querySelectorAll('.lang-switch [data-lang]').forEach((b) => {
     b.classList.toggle('active', b.dataset.lang === window.I18N.lang);

@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    loadRecordingConfig, refreshActiveRecording, enableContinuous, doExport, loadChannels,
+    loadRecordingConfig, refreshActiveRecording, enableContinuous, disableContinuous, doExport, loadChannels,
     refreshRecordings, trackGeometry, setView, draw };
 })();`);
 
@@ -330,6 +330,42 @@ test('an ambiguous lookup offers explicit playback and exports only the opened r
   assert.equal(app.state.manualRecording, null);
 });
 
+test('playback controls use inline icons and a 5 s step button', async () => {
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  const strings = readFileSync(require.resolve('../app/html/i18n.js'), 'utf8');
+  assert.match(html, /id="btnBack5"/);
+  assert.match(html, /<symbol id="ic-pause"/);
+  assert.match(html, /id="pauseIcon"[^>]*href="#ic-pause"/);
+  assert.doesNotMatch(html, /[⏪⏸⏩⏭📷]/u);
+  assert.doesNotMatch(strings, /[⏪⏸⏩⏭📷]/u);
+});
+
+test('the 5 s step button seeks five seconds before the shown time', async () => {
+  const app = await browser();
+  app.route(() => recordings(1, recording('daily', fixtureTime, fixtureTime + 60000)));
+  await app.playAt(fixtureTime + 20000);
+  assert.equal(app.state.mode, 'playback');
+  app.requests.length = 0;
+  app.element('btnBack5').events.click();
+  await tick();
+  const starttime = new Date(fixtureTime + 15000).toISOString().replace('.000Z', 'Z');
+  assert.ok(app.requests.some((u) => u.searchParams.get('starttime') === starttime),
+    app.requests.map((u) => u.search).join('\n'));
+});
+
+test('the 5 s step from live view lands in playback instead of staying live', async () => {
+  const app = await browser();
+  app.route(() => recordings(1, recording('daily', Date.now() - 120000, Date.now() - 60000)));
+  await app.playAt(Date.now());
+  assert.equal(app.state.mode, 'live');
+  app.requests.length = 0;
+  app.element('btnBack5').events.click();
+  await tick();
+  assert.equal(app.state.mode, 'paused'); // no usable option => held, but not live
+  assert.ok(app.requests.some((u) => u.pathname.endsWith('/record/list.cgi')));
+  assert.ok(app.state.pendingSeek == null);
+});
+
 test('a channel range export still refuses ambiguous footage without an explicit selection', async () => {
   const app = await browser();
   app.state.channelCount = 2;
@@ -398,6 +434,67 @@ test('a viewer can see active recording even without access to the disk list', a
   await app.refreshActiveRecording();
   assert.match(app.element('storageStatus').textContent, /storage.forbidden/);
   assert.match(app.element('recordingIndicator').textContent, /rec.activeDisk/);
+});
+
+test('continuous recording can be stopped and only the channel profile is removed', async () => {
+  const app = await browser();
+  app.state.channelCount = 2;
+  app.state.channel = 1;
+  let configs = [
+    xml('continuousrecordingconfiguration', { profile: '1', diskid: 'SD_DISK', options: 'camera=1' }),
+    xml('continuousrecordingconfiguration', { profile: '2', diskid: 'SD_DISK', options: 'camera=2' }),
+  ];
+  const removed = [];
+  app.route((url) => {
+    if (url.pathname.endsWith('/listconfiguration.cgi')) return listConfigs(...configs);
+    if (url.pathname.endsWith('/disks/list.cgi')) return listDisks(xml('disk', { diskid: 'SD_DISK', status: 'OK' }));
+    if (url.pathname.endsWith('/removeconfiguration.cgi')) {
+      const profile = url.searchParams.get('profile');
+      removed.push(profile);
+      configs = configs.filter((c) => c.getAttribute('profile') !== profile);
+      return xml('root', {}, [xml('remove', { profile, result: 'OK' })]);
+    }
+    return recordings(0);
+  });
+  await app.loadStorage();
+  await app.loadRecordingConfig();
+  await app.refreshActiveRecording();
+  assert.equal(app.element('recDisableRow').classList.contains('hidden'), false);
+  await app.disableContinuous();
+  assert.deepEqual(removed, ['1']);
+  assert.match(app.messages[0], /rec\.disable\.confirm/);
+  assert.match(app.element('toast').textContent, /rec\.disabled/);
+  assert.equal(app.element('recDisableRow').classList.contains('hidden'), true);
+  await app.refreshActiveRecording();
+  assert.equal(app.element('recEnableRow').classList.contains('hidden'), false);
+});
+
+test('stopping continuous recording does nothing when the confirmation is declined', async () => {
+  const app = await browser();
+  app.options({ confirm: false });
+  const removed = [];
+  app.route((url) => {
+    if (url.pathname.endsWith('/listconfiguration.cgi')) return listConfigs(xml('continuousrecordingconfiguration', { profile: '1', diskid: 'SD_DISK' }));
+    if (url.pathname.endsWith('/removeconfiguration.cgi')) { removed.push(url.searchParams.get('profile')); return ''; }
+    return recordings(0);
+  });
+  await app.loadRecordingConfig();
+  await app.disableContinuous();
+  assert.equal(removed.length, 0);
+  assert.equal(app.element('toast').textContent, '');
+});
+
+test('a viewer cannot stop continuous recording', async () => {
+  const app = await browser();
+  app.route((url) => {
+    if (url.pathname.endsWith('/listconfiguration.cgi')) return listConfigs(xml('continuousrecordingconfiguration', { profile: '1', diskid: 'SD_DISK' }));
+    if (url.pathname.endsWith('/removeconfiguration.cgi')) return bad(403);
+    return recordings(0);
+  });
+  await app.loadRecordingConfig();
+  await app.disableContinuous();
+  assert.match(app.element('toast').textContent, /rec\.disableFailed/);
+  assert.match(app.element('recStatus').textContent, /rec\.needsRights/);
 });
 
 test('continuous setup sends only one request while a first click is pending', async () => {
