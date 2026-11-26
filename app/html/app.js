@@ -651,8 +651,11 @@
     $('btnSnapshot').disabled = !live || !playing;
     $('btnRetryPlayback').classList.toggle('hidden', seeking || state.mode !== 'playback' || state.streamStatus !== 'error');
     const lb = $('btnLive');
-    lb.disabled = live && playing;
-    lb.classList.toggle('is-live', lb.disabled);
+    // Only offer the button when it can do something: leave playback or retry live video.
+    const hideLive = live && playing;
+    lb.disabled = false;
+    lb.classList.toggle('hidden', hideLive);
+    $('liveSep').classList.toggle('hidden', hideLive);
     $('liveLabel').textContent = live ? t(playing ? 'live.btn' : 'live.retry') : t('live.back');
     const mode = live && !playing ? state.streamStatus : seeking ? 'seeking' : state.mode;
     if (mode !== announcedMode) {
@@ -814,7 +817,11 @@
 
   let fetchTimer = null;
   let timelineRequest = null;
-  const timelineStatus = (msg) => { if ($('timelineStatus').textContent !== msg) $('timelineStatus').textContent = msg; };
+  const timelineStatus = (msg) => {
+    const el = $('timelineStatus');
+    if (el.textContent !== msg) el.textContent = msg;
+    el.classList.toggle('hidden', !msg);
+  };
   /** The "unknown type" lane only gets a legend entry when such footage is visible. */
   function showOtherLegend(rows = []) {
     const other = rows.some((r) => r.type === 'other');

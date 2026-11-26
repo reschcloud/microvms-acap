@@ -211,14 +211,37 @@ test('live badge and snapshot require active video; playback does not fetch a li
   assert.match(app.element('modeBadge').textContent, /connecting/);
   app.element('video').events.playing();
   assert.equal(app.element('modeBadge').textContent, 'badge.live');
+  // While live video plays there is nothing for the button to do.
+  assert.equal(app.element('btnLive').classList.contains('hidden'), true);
+  assert.equal(app.element('liveSep').classList.contains('hidden'), true);
   app.element('btnSnapshot').events.click();
   assert.match(app.downloads[0], /\/axis-cgi\/jpg\/image.cgi/);
   app.route(() => recordings(1, recording('clip')));
   await app.playAt(fixtureTime + 1000);
   app.element('video').events.playing();
+  assert.equal(app.element('btnLive').classList.contains('hidden'), false);
   assert.equal(app.element('btnSnapshot').disabled, true);
   app.element('btnSnapshot').events.click();
   assert.equal(app.downloads.length, 1);
+});
+
+test('timeline messages are an overlay in the image and vanish when empty', async () => {
+  const app = await browser();
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  const status = app.element('timelineStatus');
+  assert.ok(html.indexOf('id="timelineStatus"') > html.indexOf('class="video-wrap"'));
+  assert.ok(html.indexOf('id="timelineStatus"') < html.indexOf('class="timeline-panel"'));
+  assert.equal(status.classList.contains('hidden'), false); // the startup fetch found no recordings
+  app.state.viewStart = fixtureTime;
+  app.state.viewEnd = fixtureTime + 60000;
+  app.route(() => recordings(1, recording('clip', fixtureTime, fixtureTime + 60000)));
+  await app.refreshRecordings();
+  assert.equal(status.textContent, '');
+  assert.equal(status.classList.contains('hidden'), true);
+  app.route(() => recordings(0));
+  await app.refreshRecordings();
+  assert.equal(status.textContent, 'tl.empty');
+  assert.equal(status.classList.contains('hidden'), false);
 });
 
 test('calendar views include a full 25-hour or 23-hour local day', async () => {

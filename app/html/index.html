@@ -45,6 +45,7 @@
         <div id="modeBadge" class="badge" data-i18n="badge.connecting"></div>
         <div id="clock" class="clock">–</div>
         <div id="videoMsg" class="video-msg hidden" role="status"></div>
+        <div id="timelineStatus" class="tl-status small hidden" role="status"></div>
         <div class="video-menu">
           <details class="video-options">
             <summary data-i18n="ctl.options"></summary>
@@ -76,8 +77,8 @@
       <div id="manualSourceInfo" class="small muted hidden" role="status"></div>
       <div id="recordingIndicator" class="recording-indicator" role="status" data-i18n="rec.loading"></div>
       <div class="controls">
-        <button id="btnLive" class="live-btn is-live" data-i18n-title="live.btn.title" disabled><span id="liveLabel" data-i18n="live.btn"></span></button>
-        <span class="sep"></span>
+        <button id="btnLive" class="live-btn" data-i18n-title="live.btn.title" disabled><span id="liveLabel" data-i18n="live.btn"></span></button>
+        <span id="liveSep" class="sep"></span>
         <button id="btnBack" data-i18n-title="ctl.back.title">
           <svg class="icon" width="16" height="16"><use href="#ic-back-30"/></svg><span>30 s</span>
         </button>
@@ -121,7 +122,6 @@
         <canvas id="timeline"></canvas>
         <div id="tlTooltip" class="tl-tooltip hidden"></div>
       </div>
-      <div id="timelineStatus" class="small muted" role="status"></div>
       <form id="jumpForm" class="row">
         <label class="inline"><span data-i18n="tl.jumpTime"></span><input type="datetime-local" id="jumpTime" step="1" required></label>
         <button type="submit" data-i18n="tl.jump"></button>
