@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="cache-control" content="no-cache">
   <title>Micro VMS</title>
   <link rel="stylesheet" href="style.css">
   <script src="i18n.js"></script>
 </head>
 <body>
   <!-- Inline icon sprite: keeps the app self-contained (no icon font, no extra request). -->
-  <svg class="sprite" aria-hidden="true" focusable="false">
+  <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
     <symbol id="ic-play" viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></symbol>
     <symbol id="ic-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></symbol>
     <symbol id="ic-back-30" viewBox="0 0 24 24"><path d="M11.5 5v14L3 12zM21 5v14l-8.5-7z"/></symbol>
@@ -60,21 +61,21 @@
         <button id="btnLive" class="live-btn is-live" data-i18n-title="live.btn.title" disabled><span id="liveLabel" data-i18n="live.btn"></span></button>
         <span class="sep"></span>
         <button id="btnBack" data-i18n-title="ctl.back.title">
-          <svg class="icon"><use href="#ic-back-30"/></svg><span>30 s</span>
+          <svg class="icon" width="16" height="16"><use href="#ic-back-30"/></svg><span>30 s</span>
         </button>
         <button id="btnBack5" data-i18n-title="ctl.back5.title">
-          <svg class="icon"><use href="#ic-back-5"/></svg><span>5 s</span>
+          <svg class="icon" width="16" height="16"><use href="#ic-back-5"/></svg><span>5 s</span>
         </button>
         <button id="btnPause" data-i18n-title="ctl.pause.title">
-          <svg class="icon"><use id="pauseIcon" href="#ic-pause"/></svg>
+          <svg class="icon" width="16" height="16"><use id="pauseIcon" href="#ic-pause"/></svg>
         </button>
         <button id="btnFwd" data-i18n-title="ctl.fwd.title">
-          <span>30 s</span><svg class="icon"><use href="#ic-fwd-30"/></svg>
+          <span>30 s</span><svg class="icon" width="16" height="16"><use href="#ic-fwd-30"/></svg>
         </button>
         <button id="btnRetryPlayback" class="hidden" data-i18n="ctl.retryPlayback"></button>
         <span class="sep"></span>
         <button id="btnSnapshot" data-i18n-title="ctl.snapshot.title" disabled>
-          <svg class="icon"><use href="#ic-camera"/></svg><span data-i18n="ctl.snapshot"></span>
+          <svg class="icon" width="16" height="16"><use href="#ic-camera"/></svg><span data-i18n="ctl.snapshot"></span>
         </button>
       </div>
       <details class="video-options">
@@ -97,13 +98,13 @@
 
     <section class="timeline-panel">
       <div class="tl-toolbar">
-        <button id="btnPrevDay" data-i18n-title="tl.prevDay"><svg class="icon"><use href="#ic-chevron-left"/></svg></button>
+        <button id="btnPrevDay" data-i18n-title="tl.prevDay"><svg class="icon" width="16" height="16"><use href="#ic-chevron-left"/></svg></button>
         <label class="inline"><span data-i18n="tl.day"></span><input type="date" id="dayPicker"></label>
-        <button id="btnNextDay" data-i18n-title="tl.nextDay"><svg class="icon"><use href="#ic-chevron-right"/></svg></button>
+        <button id="btnNextDay" data-i18n-title="tl.nextDay"><svg class="icon" width="16" height="16"><use href="#ic-chevron-right"/></svg></button>
         <button id="btnToday" data-i18n="tl.today"></button>
         <span class="sep"></span>
-        <button id="btnZoomOut" data-i18n-title="tl.zoomOut"><svg class="icon"><use href="#ic-minus"/></svg></button>
-        <button id="btnZoomIn" data-i18n-title="tl.zoomIn"><svg class="icon"><use href="#ic-plus"/></svg></button>
+        <button id="btnZoomOut" data-i18n-title="tl.zoomOut"><svg class="icon" width="16" height="16"><use href="#ic-minus"/></svg></button>
+        <button id="btnZoomIn" data-i18n-title="tl.zoomIn"><svg class="icon" width="16" height="16"><use href="#ic-plus"/></svg></button>
         <button id="btnFitDay" data-i18n="tl.fitShort" data-i18n-title="tl.fitDay"></button>
         <span class="sep"></span>
         <button id="btnSelectMode" class="toggle" aria-pressed="false" data-i18n="tl.select" data-i18n-title="tl.select.title"></button>
@@ -191,7 +192,7 @@
         </div>
         <div id="recDisableRow" class="row hidden">
           <button id="btnDisableRec" data-i18n-title="rec.disable.title">
-            <svg class="icon"><use href="#ic-stop"/></svg><span data-i18n="rec.disable"></span>
+            <svg class="icon" width="16" height="16"><use href="#ic-stop"/></svg><span data-i18n="rec.disable"></span>
           </button>
         </div>
       </div>
