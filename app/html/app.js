@@ -1059,7 +1059,7 @@
     const request = new AbortController();
     const { signal } = request;
     exportAbort = request;
-    $('btnExport').disabled = $('btnQuickClip').disabled = $('btnClearSel').disabled = true;
+    $('btnExport').disabled = $('btnClearSel').disabled = true;
     $('btnCancelExport').classList.remove('hidden');
     $('expInfo').textContent = t('exp.checking');
     try {
@@ -1073,21 +1073,14 @@
       if (chosen.some(({ r }) => !r.disk)) throw new Error(t('err.xml'));
       const merge = mergeRequested && !usePw && chosen.length > 1;
       const gaps = b - a - chosen.reduce((ms, c) => ms + c.e - c.s, 0);
-      const details = [
-        t('exp.review', { from: `${fmtDateTime(a)} ${fmtOffset(a)}`, to: `${fmtDateTime(b)} ${fmtOffset(b)}`, parts: chosen.length }),
-        clipChannel,
-        manual ? t('exp.manualOnly') : null,
-        gaps > 0 ? t(manual ? 'exp.manualGap' : 'exp.gaps', { d: gaps < 1000 ? '< 1 s' : fmtDuration(gaps) }) : t('exp.noGaps'),
-        b - a > 6 * HOUR ? t('exp.large', { d: fmtDuration(b - a) }) : null,
-        merge ? t('exp.mergeReview') : t('exp.files', { n: chosen.length }),
-        t('exp.keyframe'),
-      ].filter(Boolean).join('\n');
-      if (!confirm(details)) { $('expInfo').textContent = t('exp.aborted'); return; }
+      if (b - a > 6 * HOUR) toast(t('exp.large', { d: fmtDuration(b - a) }));
+      const gapNote = gaps > 0 ? t('exp.gaps', { d: gaps < 1000 ? '< 1 s' : fmtDuration(gaps) }) : '';
       $('expLinks').innerHTML = '';
 
       if (!merge) {
         exportSeparate(chosen, base, pw);
-        $('expInfo').textContent = chosen.length > 1 ? t('exp.parts', { n: chosen.length }) : t('exp.started');
+        $('expInfo').textContent = [t(chosen.length > 1 ? 'exp.parts' : 'exp.started', { n: chosen.length }), gapNote]
+          .filter(Boolean).join(' ');
         return;
       }
       try {
@@ -1107,7 +1100,7 @@
       request.abort();
       exportAbort = null;
       $('btnCancelExport').classList.add('hidden');
-      $('btnExport').disabled = $('btnQuickClip').disabled = $('btnClearSel').disabled = false;
+      $('btnExport').disabled = $('btnClearSel').disabled = false;
     }
   }
 
@@ -1378,15 +1371,6 @@
   $('expEnd').addEventListener('change', selectionFromInputs);
   $('expPwEnable').addEventListener('change', (ev) => $('expPwRow').classList.toggle('hidden', !ev.target.checked));
   $('btnExport').addEventListener('click', () => doExport(...selectedExportRange()));
-  $('btnQuickClip').addEventListener('click', () => {
-    if (exportAbort) return;
-    const end = Math.floor((state.pendingSeek ?? currentWall()) / 1000) * 1000;
-    state.selStart = end - SKIP;
-    state.selEnd = end;
-    syncSelectionInputs();
-    draw();
-    doExport(state.selStart, state.selEnd);
-  });
   $('btnCancelExport').addEventListener('click', () => { if (exportAbort) exportAbort.abort(); });
   $('btnClearSel').addEventListener('click', () => {
     state.selStart = state.selEnd = null;

@@ -10,7 +10,7 @@ Ein kleines VMS direkt in der Weboberfläche der Kamera:
   - Getrennte Spuren: Daueraufzeichnung (blau), Ereignis (orange), Zeitplan (lila); ein Klick auf einen orangefarbenen Abschnitt öffnet den Ereignisclip auch bei gleichzeitiger Daueraufnahme.
   - Klick auf die Timeline → Wiedergabe ab diesem Zeitpunkt, automatischer Sprung in die nächste Aufzeichnung
   - ±30 s, −5 s, Pause (Pause im Live-Modus = Timeshift: „Weiter“ spielt ab dem Pausenzeitpunkt aus der Aufzeichnung); Bedienelemente mit Inline-SVG-Icons
-- **Clip sichern**: letzte 30 Sekunden bis zum aktuellen Live-/Wiedergabezeitpunkt oder einen Zeitraum wählen. Vor dem Download zeigt Micro VMS die Aufnahmelücken und die Anzahl der Teile. Die Kamera kann Ausschnitte am vorherigen Keyframe beginnen; exportiertes Material kann daher vor dem gewählten Start liegen.
+- **Clip exportieren**: Zeitraum im Formular oder auf der Timeline wählen, **Export starten** – der Download beginnt sofort, ohne Zwischendialog. Aufnahmelücken und die Anzahl der Teile stehen danach unter den Buttons. Die Kamera kann Ausschnitte am vorherigen Keyframe beginnen; exportiertes Material kann daher vor dem gewählten Start liegen.
   - Liegt der Zeitraum über mehreren Aufzeichnungen (Unterbrechung, Neustart, Ereignisaufzeichnungen), lädt der Browser die Teil-Exporte nacheinander und fügt sie ohne Neukodierung zu einer Datei zusammen (`html/mkvconcat.js`): fortlaufende Zeitstempel, Lücken übersprungen, mit Dauer, Aufnahmedatum und Index (Cues) → in VLC & Co. normal spulbar
   - Fortschrittsanzeige und Abbrechen
   - Fallback auf Einzeldateien, wenn sich die Videoparameter zwischen den Aufzeichnungen unterscheiden (z. B. Auflösung geändert)
@@ -79,7 +79,7 @@ Für Aufzeichnungen muss eine SD-Karte/NAS eingerichtet und eine Aufzeichnung ko
 1. Paket installieren, App öffnen und mit eingesetzter SD-Karte die Speicheranzeige prüfen. Falls noch nichts aufzeichnet: als Operator/Admin eine Daueraufnahme starten oder sie in AXIS OS einrichten. Prüfen, dass die App erst bei laufender Aufnahme „Aufnahme läuft“ meldet.
 2. Eine bekannte Uhrzeit in der Timeline oder per Datumsfeld öffnen. Direkt danach **Zurück zu Live** wählen. Eine verspätete Suche darf nicht zurück in die Wiedergabe wechseln.
    Falls Treffer keinem Kanal eindeutig zugeordnet werden können, die graue Spur anklicken und die Aufnahme unter dem Videobild auswählen. Der anschließende Clip-Export verwendet in diesem Modus nur diese eine Aufnahme.
-3. **Letzte 30 s sichern** oder einen Bereich wählen. Zusammenfassung prüfen, Datei herunterladen und Bildinhalt, Zeitraum und Spulbarkeit kontrollieren. Falls möglich, einen Export über eine Aufnahmelücke testen.
+3. Einen Bereich wählen und **Export starten**. Der Download beginnt sofort; Datei, Bildinhalt, Zeitraum und Spulbarkeit kontrollieren. Falls möglich, einen Export über eine Aufnahmelücke testen.
 4. Als Betrachter prüfen, dass Livebild und Timeline weiterhin nutzbar sind, auch wenn der Speicherstatus nicht gelesen werden darf. Nach einem Kameraneustart Livebild, laufende Aufnahme und alte Aufnahmen erneut prüfen.
 
 ## Projektstruktur

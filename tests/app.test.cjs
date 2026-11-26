@@ -320,7 +320,7 @@ test('an ambiguous lookup offers explicit playback and exports only the opened r
   assert.equal(app.state.pipeline.parameters[0], 'recordingid=ambiguous');
   assert.match(app.element('manualSourceInfo').textContent, /manualSource/);
   await app.doExport(fixtureTime, fixtureTime + 30000);
-  assert.match(app.messages[0], /exp.manualOnly/);
+  assert.equal(app.messages.length, 0);
   assert.equal(app.downloads.length, 1);
   assert.match(app.downloads[0], /recordingid=ambiguous/);
   assert.doesNotMatch(app.downloads[0], /_ch1/);
@@ -386,17 +386,18 @@ test('clip planning favors continuous recording, preserves sub-second footage an
   ]));
 });
 
-test('clip review warns about gaps and keyframes, and declining it downloads nothing', async () => {
+test('an export downloads immediately without a confirmation dialog', async () => {
   const app = await browser();
   app.route(() => recordings(1, recording('clip', fixtureTime + 1000, fixtureTime + 20000)));
-  app.options({ confirm: false });
   await app.doExport(fixtureTime, fixtureTime + 30000);
-  assert.match(app.messages[0], /exp.gaps/);
-  assert.match(app.messages[0], /exp.keyframe/);
-  assert.equal(app.downloads.length, 0);
-  app.options({ confirm: true });
-  await app.doExport(fixtureTime, fixtureTime + 30000);
+  assert.equal(app.messages.length, 0);
   assert.match(app.downloads[0], /recordingid=clip/);
+  assert.match(app.element('expInfo').textContent, /exp\.gaps/);
+});
+
+test('the old quick clip button is gone', async () => {
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  assert.doesNotMatch(html, /btnQuickClip|exp\.quick/);
 });
 
 test('an export stops before review if the camera will not return all matching recordings', async () => {
