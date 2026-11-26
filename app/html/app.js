@@ -815,10 +815,9 @@
   let fetchTimer = null;
   let timelineRequest = null;
   const timelineStatus = (msg) => { if ($('timelineStatus').textContent !== msg) $('timelineStatus').textContent = msg; };
-  function showTimelineCounts(rows = []) {
+  /** The "unknown type" lane only gets a legend entry when such footage is visible. */
+  function showOtherLegend(rows = []) {
     const other = rows.some((r) => r.type === 'other');
-    const label = rows.length ? t('tl.eventCount', { n: rows.length }) : '';
-    if ($('timelineEvents').textContent !== label) $('timelineEvents').textContent = label;
     $('otherSwatch').classList.toggle('hidden', !other);
     $('otherLegend').classList.toggle('hidden', !other);
   }
@@ -826,7 +825,7 @@
     clearTimeout(fetchTimer);
     timelineRequest?.abort();
     timelineStatus(t('tl.loading'));
-    showTimelineCounts();
+    showOtherLegend();
     fetchTimer = setTimeout(() => refreshRecordings(), 250);
   }
 
@@ -837,14 +836,14 @@
     timelineRequest = request;
     const { viewStart, viewEnd, channel } = state;
     const margin = (viewEnd - viewStart) * 0.5;
-    if (!background) { timelineStatus(t('tl.loading')); showTimelineCounts(); }
+    if (!background) { timelineStatus(t('tl.loading')); showOtherLegend(); }
     try {
       const { recs, unknown, complete } = await listRecordings(viewStart - margin, Math.min(viewEnd + margin, Date.now()), { channel, signal: request.signal });
       if (request.signal.aborted) return;
       const visible = (r) => r.start < viewEnd && recStop(r) > viewStart;
       state.recordings = recs;
       state.unassignedRecordings = unknown;
-      showTimelineCounts(recs.filter(visible));
+      showOtherLegend(recs.filter(visible));
       timelineStatus(!complete ? t('tl.partial')
         : unknown.some(visible) ? t('tl.unknown')
         : recs.some(visible) ? '' : t('tl.empty'));
@@ -852,7 +851,7 @@
     } catch (e) {
       if (!request.signal.aborted) {
         timelineStatus(t('toast.timeline', { msg: e.message }));
-        showTimelineCounts();
+        showOtherLegend();
       }
     }
   }
