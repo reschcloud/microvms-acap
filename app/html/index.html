@@ -45,10 +45,28 @@
         <div id="modeBadge" class="badge" data-i18n="badge.connecting"></div>
         <div id="clock" class="clock">–</div>
         <div id="videoMsg" class="video-msg hidden" role="status"></div>
-        <label id="channelWrap" class="channel-overlay hidden">
-          <span id="channelLabel"></span>
-          <select id="channel"></select>
-        </label>
+        <div class="video-menu">
+          <details class="video-options">
+            <summary data-i18n="ctl.options"></summary>
+            <div class="row">
+              <label id="streamWrap" class="inline hidden"><span data-i18n="ctl.stream">Stream</span>
+                <select id="streamProfile"><option value="" data-i18n="ctl.stream.auto"></option></select>
+              </label>
+              <label class="inline"><span data-i18n="ctl.resolution">Auflösung</span>
+                <select id="resolution">
+                  <option value="" data-i18n="ctl.resolution.default"></option>
+                  <option value="1920x1080">1920×1080</option>
+                  <option value="1280x720">1280×720</option>
+                  <option value="640x360">640×360</option>
+                </select>
+              </label>
+            </div>
+          </details>
+          <label id="channelWrap" class="channel-overlay hidden">
+            <span id="channelLabel"></span>
+            <select id="channel"></select>
+          </label>
+        </div>
       </div>
 
       <div id="sourceChoices" class="card hidden" aria-labelledby="sourceChoiceHint">
@@ -78,22 +96,6 @@
           <svg class="icon" width="16" height="16"><use href="#ic-camera"/></svg><span data-i18n="ctl.snapshot"></span>
         </button>
       </div>
-      <details class="video-options">
-        <summary data-i18n="ctl.options"></summary>
-        <div class="row">
-          <label id="streamWrap" class="inline hidden"><span data-i18n="ctl.stream">Stream</span>
-            <select id="streamProfile"><option value="" data-i18n="ctl.stream.auto"></option></select>
-          </label>
-          <label class="inline"><span data-i18n="ctl.resolution">Auflösung</span>
-            <select id="resolution">
-              <option value="" data-i18n="ctl.resolution.default"></option>
-              <option value="1920x1080">1920×1080</option>
-              <option value="1280x720">1280×720</option>
-              <option value="640x360">640×360</option>
-            </select>
-          </label>
-        </div>
-      </details>
     </section>
 
     <section class="timeline-panel">

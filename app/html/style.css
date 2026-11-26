@@ -55,18 +55,23 @@ body { display: flex; flex-direction: column; background: var(--bg); color: var(
   background: rgba(0,0,0,.6); font-variant-numeric: tabular-nums; }
 .video-msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(0,0,0,.55); font-size: 15px; text-align: center; padding: 20px; }
-.channel-overlay { position: absolute; z-index: 1; left: 10px; bottom: 10px; max-width: calc(100% - 20px);
-  flex-direction: row; align-items: center; gap: 6px; padding: 4px 6px 4px 9px; border-radius: 7px;
-  background: rgba(0,0,0,.8); color: #fff; }
+.video-menu { position: absolute; z-index: 1; right: 10px; bottom: 10px;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
+  max-width: calc(100% - 20px); }
+.channel-overlay { flex-direction: row; align-items: center; gap: 6px; padding: 4px 6px 4px 9px;
+  border-radius: 7px; background: rgba(0,0,0,.8); color: #fff; }
 .channel-overlay span { white-space: nowrap; }
 .channel-overlay select { min-width: 0; max-width: 100%; padding: 4px 6px; }
 
 .controls, .tl-toolbar, .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.controls { margin-top: 8px; }
+.controls { margin-top: 8px; justify-content: center; }
 .recording-indicator { margin-top: 6px; color: var(--muted); }
 .recording-indicator.active { color: #4ade80; }
 #sourceChoices { margin-top: 6px; max-height: 12rem; overflow: auto; flex-shrink: 0; }
-.video-options { margin-top: 6px; }
+.video-options { margin: 0; background: rgba(0,0,0,.8); border-radius: 7px; padding: 4px 9px; color: #fff; }
+.video-options summary { color: #fff; }
+.video-options[open] { padding-bottom: 6px; }
+.video-options label { color: #e6e9ee; }
 summary { color: var(--muted); cursor: pointer; }
 details[open] summary { margin-bottom: 6px; }
 .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }

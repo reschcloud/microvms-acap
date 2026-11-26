@@ -91,7 +91,7 @@
       'tl.legend.triggered': 'Ereignis',
       'tl.legend.scheduled': 'Zeitplan',
       'tl.legend.other': 'Typ unbekannt',
-      'tl.eventCount': '{n} Ereignisclips im sichtbaren Zeitraum gemeldet',
+      'tl.eventCount': '{n} Aufzeichnungen im sichtbaren Zeitraum',
       'tl.hint': 'Klick = Wiedergabe ab Zeitpunkt · Ziehen = verschieben · Mausrad = Zoom · Shift+Ziehen oder „Bereich wählen“ = Exportbereich',
 
       'exp.title': 'Clip sichern',
@@ -253,7 +253,7 @@
       'tl.legend.triggered': 'Event',
       'tl.legend.scheduled': 'Scheduled',
       'tl.legend.other': 'Unknown type',
-      'tl.eventCount': '{n} event clips reported in the visible range',
+      'tl.eventCount': '{n} recordings in the visible range',
       'tl.hint': 'Click = play from that time · Drag = pan · Wheel = zoom · Shift+drag or “Select range” = export range',
 
       'exp.title': 'Save a clip',

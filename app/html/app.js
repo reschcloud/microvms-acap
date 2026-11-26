@@ -745,15 +745,18 @@
     ctx.font = '11px system-ui, sans-serif';
     ctx.textBaseline = 'top';
     for (; tick <= state.viewEnd; tick += step) {
-      const x = Math.round(xOf(tick)) + 0.5;
       const d = new Date(tick);
       const isMidnight = d.getHours() === 0 && d.getMinutes() === 0;
+      // Day boundaries get a thicker, crisper line.
+      const x = Math.round(xOf(tick)) + (isMidnight ? 0 : 0.5);
       ctx.strokeStyle = isMidnight ? COLORS.text : COLORS.line;
+      ctx.lineWidth = isMidnight ? 2 : 1;
       ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, H); ctx.stroke();
       ctx.fillStyle = COLORS.text;
       const hour = fmtTime(tick, step < MIN * 1.5);
       ctx.fillText(isMidnight ? fmtDate(tick) : changesOffset ? `${hour} ${fmtOffset(tick)}` : hour, x + 3, 4);
     }
+    ctx.lineWidth = 1;
 
     for (const r of state.unassignedRecordings) {
       const x1 = Math.max(0, xOf(r.start));
@@ -813,9 +816,8 @@
   let timelineRequest = null;
   const timelineStatus = (msg) => { if ($('timelineStatus').textContent !== msg) $('timelineStatus').textContent = msg; };
   function showTimelineCounts(rows = []) {
-    const events = rows.filter((r) => r.type === 'triggered').length;
     const other = rows.some((r) => r.type === 'other');
-    const label = rows.length ? t('tl.eventCount', { n: events }) : '';
+    const label = rows.length ? t('tl.eventCount', { n: rows.length }) : '';
     if ($('timelineEvents').textContent !== label) $('timelineEvents').textContent = label;
     $('otherSwatch').classList.toggle('hidden', !other);
     $('otherLegend').classList.toggle('hidden', !other);

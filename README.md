@@ -3,7 +3,7 @@
 Ein kleines VMS direkt in der Weboberfläche der Kamera:
 
 - **Live-Ansicht** (H.264 über RTSP-over-WebSocket → HTML5-Video/MSE), Auflösung unter Videoeinstellungen, Live-Schnappschuss als JPEG
-- **Mehrere Kanäle/Sensoren** (Multisensor-Kameras, Encoder, View Areas, Quad-Ansicht): Die Kanalauswahl sitzt direkt im Videobild, sobald die Kamera mehr als eine Ansicht meldet – auch ohne SD-Karte (`Properties.Image.NbrOfViews`, Namen aus `Image.I#.Name`, deaktivierte Kanäle sind nicht auswählbar). Live, Timeline, Wiedergabe, Export, Schnappschuss, PTZ und Daueraufzeichnung beziehen sich jeweils auf den gewählten Kanal; beim Kanalwechsel in der Wiedergabe springt die Ansicht zum selben Zeitpunkt des anderen Kanals.
+- **Mehrere Kanäle/Sensoren** (Multisensor-Kameras, Encoder, View Areas, Quad-Ansicht): Die Kanalauswahl sitzt zusammen mit den Videoeinstellungen unten rechts im Videobild, sobald die Kamera mehr als eine Ansicht meldet – auch ohne SD-Karte (`Properties.Image.NbrOfViews`, Namen aus `Image.I#.Name`, deaktivierte Kanäle sind nicht auswählbar). Live, Timeline, Wiedergabe, Export, Schnappschuss, PTZ und Daueraufzeichnung beziehen sich jeweils auf den gewählten Kanal; beim Kanalwechsel in der Wiedergabe springt die Ansicht zum selben Zeitpunkt des anderen Kanals.
 - **Stream-Profile**: Auswahl der auf der Kamera angelegten Profile (`streamprofile.cgi`), H.264 wird dabei erzwungen, damit der Browser es abspielen kann
 - **Zweisprachig (Deutsch/English)**: automatisch nach Browsersprache, umschaltbar oben rechts (Auswahl wird gemerkt)
 - **Timeline** der Edge-Storage-Aufzeichnungen (SD-Karte / NAS) mit Kalendertagen, Zoom (Mausrad), Verschieben (Ziehen) und direktem Sprung zu Datum/Uhrzeit

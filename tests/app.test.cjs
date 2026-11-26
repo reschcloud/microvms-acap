@@ -131,7 +131,7 @@ test('overlapping event footage has its own visible track and opens by recording
   app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
   app.rectangles.length = 0;
   await app.refreshRecordings();
-  assert.match(app.element('timelineEvents').textContent, /"n":2/);
+  assert.match(app.element('timelineEvents').textContent, /"n":5/); // every visible recording, not only events
   assert.equal(app.element('otherLegend').classList.contains('hidden'), false);
   const eventBar = app.rectangles.find((r) => r.color === '#f59e0b');
   const continuousBar = app.rectangles.find((r) => r.color === '#3b82f6');
