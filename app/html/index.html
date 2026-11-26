@@ -26,58 +26,78 @@
     <section class="viewer">
       <div class="video-wrap">
         <video id="video" muted autoplay playsinline></video>
-        <div id="modeBadge" class="badge live" data-i18n="badge.live">LIVE</div>
+        <div id="modeBadge" class="badge" data-i18n="badge.connecting"></div>
         <div id="clock" class="clock">–</div>
-        <div id="videoMsg" class="video-msg hidden"></div>
+        <div id="videoMsg" class="video-msg hidden" role="status"></div>
+        <label id="channelWrap" class="channel-overlay hidden">
+          <span id="channelLabel"></span>
+          <select id="channel"></select>
+        </label>
       </div>
 
+      <div id="sourceChoices" class="card hidden" aria-labelledby="sourceChoiceHint">
+        <div id="sourceChoiceHint" role="status"></div>
+        <div id="sourceChoiceList" class="row"></div>
+      </div>
+      <div id="manualSourceInfo" class="small muted hidden" role="status"></div>
+      <div id="recordingIndicator" class="recording-indicator" role="status" data-i18n="rec.loading"></div>
       <div class="controls">
         <button id="btnLive" class="live-btn is-live" data-i18n="live.btn" data-i18n-title="live.btn.title" disabled>Live</button>
         <span class="sep"></span>
         <button id="btnBack" data-i18n-title="ctl.back.title">⏪ 30s</button>
         <button id="btnPause" data-i18n-title="ctl.pause.title">⏸</button>
         <button id="btnFwd" data-i18n-title="ctl.fwd.title">30s ⏩</button>
+        <button id="btnRetryPlayback" class="hidden" data-i18n="ctl.retryPlayback"></button>
         <span class="sep"></span>
-        <label id="channelWrap" class="inline hidden"><span data-i18n="ctl.channel">Kanal</span>
-          <select id="channel"></select>
-        </label>
-        <label id="streamWrap" class="inline hidden"><span data-i18n="ctl.stream">Stream</span>
-          <select id="streamProfile"><option value="" data-i18n="ctl.stream.auto"></option></select>
-        </label>
-        <label class="inline"><span data-i18n="ctl.resolution">Auflösung</span>
-          <select id="resolution">
-            <option value="" data-i18n="ctl.resolution.default"></option>
-            <option value="1920x1080">1920×1080</option>
-            <option value="1280x720">1280×720</option>
-            <option value="640x360">640×360</option>
-          </select>
-        </label>
-        <button id="btnSnapshot" data-i18n="ctl.snapshot" data-i18n-title="ctl.snapshot.title"></button>
+        <button id="btnSnapshot" data-i18n="ctl.snapshot" data-i18n-title="ctl.snapshot.title" disabled></button>
       </div>
+      <details class="video-options">
+        <summary data-i18n="ctl.options"></summary>
+        <div class="row">
+          <label id="streamWrap" class="inline hidden"><span data-i18n="ctl.stream">Stream</span>
+            <select id="streamProfile"><option value="" data-i18n="ctl.stream.auto"></option></select>
+          </label>
+          <label class="inline"><span data-i18n="ctl.resolution">Auflösung</span>
+            <select id="resolution">
+              <option value="" data-i18n="ctl.resolution.default"></option>
+              <option value="1920x1080">1920×1080</option>
+              <option value="1280x720">1280×720</option>
+              <option value="640x360">640×360</option>
+            </select>
+          </label>
+        </div>
+      </details>
     </section>
 
     <section class="timeline-panel">
       <div class="tl-toolbar">
         <button id="btnPrevDay" data-i18n-title="tl.prevDay">◀</button>
-        <input type="date" id="dayPicker">
+        <label class="inline"><span data-i18n="tl.day"></span><input type="date" id="dayPicker"></label>
         <button id="btnNextDay" data-i18n-title="tl.nextDay">▶</button>
         <button id="btnToday" data-i18n="tl.today"></button>
         <span class="sep"></span>
         <button id="btnZoomOut" data-i18n-title="tl.zoomOut">−</button>
         <button id="btnZoomIn" data-i18n-title="tl.zoomIn">+</button>
-        <button id="btnFitDay" data-i18n-title="tl.fitDay">24h</button>
+        <button id="btnFitDay" data-i18n="tl.fitShort" data-i18n-title="tl.fitDay"></button>
         <span class="sep"></span>
-        <button id="btnSelectMode" class="toggle" data-i18n="tl.select" data-i18n-title="tl.select.title"></button>
+        <button id="btnSelectMode" class="toggle" aria-pressed="false" data-i18n="tl.select" data-i18n-title="tl.select.title"></button>
         <span class="legend">
           <i class="lg continuous"></i><span data-i18n="tl.legend.continuous"></span>
           <i class="lg triggered"></i><span data-i18n="tl.legend.triggered"></span>
           <i class="lg scheduled"></i><span data-i18n="tl.legend.scheduled"></span>
+          <i id="otherSwatch" class="lg other hidden"></i><span id="otherLegend" class="hidden" data-i18n="tl.legend.other"></span>
         </span>
       </div>
       <div class="tl-canvas-wrap">
         <canvas id="timeline"></canvas>
         <div id="tlTooltip" class="tl-tooltip hidden"></div>
       </div>
+      <div id="timelineStatus" class="small muted" role="status"></div>
+      <div id="timelineEvents" class="small muted" role="status"></div>
+      <form id="jumpForm" class="row">
+        <label class="inline"><span data-i18n="tl.jumpTime"></span><input type="datetime-local" id="jumpTime" step="1" required></label>
+        <button type="submit" data-i18n="tl.jump"></button>
+      </form>
       <div class="hint muted" data-i18n="tl.hint"></div>
     </section>
 
@@ -86,16 +106,20 @@
         <h3 data-i18n="exp.title"></h3>
         <label><span data-i18n="exp.from"></span> <input type="datetime-local" id="expStart" step="1"></label>
         <label><span data-i18n="exp.to"></span> <input type="datetime-local" id="expEnd" step="1"></label>
-        <label><span data-i18n="exp.name"></span> <input type="text" id="expName" placeholder="export"></label>
-        <label class="inline"><input type="checkbox" id="expMerge" checked> <span data-i18n="exp.merge"></span></label>
-        <label class="inline"><input type="checkbox" id="expPwEnable"> <span data-i18n="exp.password"></span></label>
-        <input type="password" id="expPw" data-i18n-placeholder="exp.password.placeholder" class="hidden" autocomplete="new-password">
+        <details>
+          <summary data-i18n="exp.options"></summary>
+          <label><span data-i18n="exp.name"></span> <input type="text" id="expName" placeholder="export"></label>
+          <label class="inline"><input type="checkbox" id="expMerge" checked> <span data-i18n="exp.merge"></span></label>
+          <label class="inline"><input type="checkbox" id="expPwEnable"> <span data-i18n="exp.password"></span></label>
+          <label id="expPwRow" class="hidden"><span data-i18n="exp.password.placeholder"></span><input type="password" id="expPw" autocomplete="new-password"></label>
+        </details>
         <div class="row">
           <button id="btnExport" class="primary" data-i18n="exp.start"></button>
+          <button id="btnQuickClip" data-i18n="exp.quick"></button>
           <button id="btnCancelExport" class="hidden" data-i18n="exp.cancel"></button>
           <button id="btnClearSel" data-i18n="exp.clear"></button>
         </div>
-        <div id="expInfo" class="muted small"></div>
+        <div id="expInfo" class="muted small" role="status"></div>
         <ul id="expLinks" class="links"></ul>
       </div>
 
@@ -139,12 +163,11 @@
           <select id="recDisk" data-i18n-title="rec.disk.title"></select>
           <button id="btnEnableRec" data-i18n="rec.enable"></button>
         </div>
-        <div class="muted small" data-i18n-html="rec.hint"></div>
       </div>
     </section>
   </main>
 
-  <div id="toast" class="toast hidden"></div>
+  <div id="toast" class="toast hidden" role="status"></div>
 
   <script>I18N.apply();</script>
   <script src="vendor/media-stream-library.min.js"></script>

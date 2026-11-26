@@ -1,15 +1,15 @@
 # ADR 0005: Firmware-Unterschiede an der VAPIX-Grenze behandeln
 
-**Status:** Vorgeschlagen
+**Status:** Konservative Zuordnung umgesetzt; Kameratest ausstehend
 
 ## Kontext
 
-VAPIX verwendet für `camera=N` einen 1-basierten Kanal, aber `Image.I#` ist 0-basiert. Für das `source`-Attribut von Aufnahmen nimmt der aktuelle Code 1-basierte Werte an, bis er in einer Antwort `source=0` sieht. Ohne diesen Beleg kann derselbe Wert zu zwei verschiedenen Kanälen passen. Fehlende Quellen werden derzeit nicht nach Kanal ausgefiltert.
+VAPIX verwendet für `camera=N` einen 1-basierten Kanal, aber `Image.I#` ist 0-basiert. Der frühere Code nahm für Aufnahmequellen zunächst 1-basierte Werte an und wechselte erst bei `source=0`. Ohne Beleg kann derselbe Wert zu zwei verschiedenen Kanälen passen.
 
-## Vorschlag
+## Entscheidung
 
-Kanalnummern und Aufnahmequellen an einer gemeinsamen Grenze zur Kamera normalisieren, bevor Timeline, Wiedergabe oder Export sie verwenden. Die Kanal-ID der App bleibt 1-basiert. Eindeutige, fehlende und mehrdeutige Zuordnungen sollen im Datenmodell unterscheidbar sein. Welche Aufnahmen bei unklarer Quelle angezeigt, abgespielt oder exportiert werden dürfen, ist vor der Umstellung explizit zu entscheiden, nicht pro Funktion nebenbei.
+`selectChannel()` normalisiert nummerierte Quellen vor Timeline, Wiedergabe und Export. Die Kanal-ID der App bleibt 1-basiert. Bei Mehrkanalgeräten sprechen `0` bzw. die physische Kanalanzahl für die jeweilige Nummerierung. Der Quellenkatalog (`listentity=source`) ergänzt die Aufnahmeliste; ohne eindeutigen Beleg oder bei widersprüchlichen Daten bleibt die Zuordnung offen. Ausnahme: Kennen Quellenkatalog und Aufnahmeliste zusammen genau eine nummerierte Quelle, gehören deren Aufnahmen zum ersten aktivierten Kanal (beobachtet: Einzelsensor-Kamera mit `NbrOfViews=2`, Katalog und alle Aufnahmen nur `source=1`). `Quad` gehört zu keinem nummerierten Kanal. Die graue Timeline-Spur erlaubt die bewusste Auswahl einer mehrdeutigen Aufnahme; Wiedergabe und Clip-Export verwenden dann ausschließlich deren ID. Ein kanalbezogener Clip-Export mit mehrdeutigen Treffern bricht weiterhin ab. Bei Ein-Kanal-Geräten bleibt eine fehlende Quelle zulässig.
 
 ## Nächster Schritt
 
-Anonymisierte Aufnahmelisten von Mehrkanalgeräten sammeln und die Zuordnung gegen bekannte Kanäle prüfen. Testfälle sollen 0- und 1-basierte Antworten, fehlende Quellen, deaktivierte Kanäle und eine Teilliste ohne `source=0` abdecken. Bis diese Daten vorliegen, keine Firmware-Regel als gesichert dokumentieren.
+Anonymisierte Aufnahmelisten von Mehrkanalgeräten sammeln und die Zuordnung gegen bekannte Kanäle prüfen. Die Mock-Tests prüfen die konservative Entscheidung, belegen aber keine Firmware-Regel.

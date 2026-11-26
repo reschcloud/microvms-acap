@@ -2,15 +2,15 @@
 
 Ein kleines VMS direkt in der Weboberfläche der Kamera:
 
-- **Live-Ansicht** (H.264 über RTSP-over-WebSocket → HTML5-Video/MSE), Auflösung wählbar, Schnappschuss als JPEG
-- **Mehrere Kanäle/Sensoren** (Multisensor-Kameras, Encoder, View Areas, Quad-Ansicht): Kanalauswahl erscheint automatisch, sobald die Kamera mehr als einen Kanal meldet (`Properties.Image.NbrOfViews`, Namen aus `Image.I#.Name`, deaktivierte Kanäle werden ausgeblendet). Live, Timeline, Wiedergabe, Export, Schnappschuss, PTZ und Daueraufzeichnung beziehen sich jeweils auf den gewählten Kanal; beim Kanalwechsel in der Wiedergabe springt die Ansicht zum selben Zeitpunkt des anderen Kanals.
+- **Live-Ansicht** (H.264 über RTSP-over-WebSocket → HTML5-Video/MSE), Auflösung unter Videoeinstellungen, Live-Schnappschuss als JPEG
+- **Mehrere Kanäle/Sensoren** (Multisensor-Kameras, Encoder, View Areas, Quad-Ansicht): Die Kanalauswahl sitzt direkt im Videobild, sobald die Kamera mehr als eine Ansicht meldet – auch ohne SD-Karte (`Properties.Image.NbrOfViews`, Namen aus `Image.I#.Name`, deaktivierte Kanäle sind nicht auswählbar). Live, Timeline, Wiedergabe, Export, Schnappschuss, PTZ und Daueraufzeichnung beziehen sich jeweils auf den gewählten Kanal; beim Kanalwechsel in der Wiedergabe springt die Ansicht zum selben Zeitpunkt des anderen Kanals.
 - **Stream-Profile**: Auswahl der auf der Kamera angelegten Profile (`streamprofile.cgi`), H.264 wird dabei erzwungen, damit der Browser es abspielen kann
 - **Zweisprachig (Deutsch/English)**: automatisch nach Browsersprache, umschaltbar oben rechts (Auswahl wird gemerkt)
-- **Timeline** der Edge-Storage-Aufzeichnungen (SD-Karte / NAS) mit Tagesauswahl, Zoom (Mausrad), Verschieben (Ziehen)
-  - Farben: Daueraufzeichnung (blau), Ereignis (orange), Zeitplan (lila)
+- **Timeline** der Edge-Storage-Aufzeichnungen (SD-Karte / NAS) mit Kalendertagen, Zoom (Mausrad), Verschieben (Ziehen) und direktem Sprung zu Datum/Uhrzeit
+  - Getrennte Spuren: Daueraufzeichnung (blau), Ereignis (orange), Zeitplan (lila); ein Klick auf einen orangefarbenen Abschnitt öffnet den Ereignisclip auch bei gleichzeitiger Daueraufnahme.
   - Klick auf die Timeline → Wiedergabe ab diesem Zeitpunkt, automatischer Sprung in die nächste Aufzeichnung
   - ±30 s, Pause (Pause im Live-Modus = Timeshift: „Weiter“ spielt ab dem Pausenzeitpunkt aus der Aufzeichnung)
-- **Export** eines Zeitbereichs (auf der Timeline ziehen oder Von/Bis eingeben) als **eine** Matroska-Datei (`.mkv`)
+- **Clip sichern**: letzte 30 Sekunden bis zum aktuellen Live-/Wiedergabezeitpunkt oder einen Zeitraum wählen. Vor dem Download zeigt Micro VMS die Aufnahmelücken und die Anzahl der Teile. Die Kamera kann Ausschnitte am vorherigen Keyframe beginnen; exportiertes Material kann daher vor dem gewählten Start liegen.
   - Liegt der Zeitraum über mehreren Aufzeichnungen (Unterbrechung, Neustart, Ereignisaufzeichnungen), lädt der Browser die Teil-Exporte nacheinander und fügt sie ohne Neukodierung zu einer Datei zusammen (`html/mkvconcat.js`): fortlaufende Zeitstempel, Lücken übersprungen, mit Dauer, Aufnahmedatum und Index (Cues) → in VLC & Co. normal spulbar
   - Fortschrittsanzeige und Abbrechen
   - Fallback auf Einzeldateien, wenn sich die Videoparameter zwischen den Aufzeichnungen unterscheiden (z. B. Auflösung geändert)
@@ -20,7 +20,7 @@ Ein kleines VMS direkt in der Weboberfläche der Kamera:
   - Klick ins Livebild zentriert, Mausrad zoomt auf die Mausposition; Tastatur: Pfeiltasten, + / −
   - Nur in der Live-Ansicht aktiv; bei Fokusverlust/Tabwechsel wird jede Bewegung sofort gestoppt
   - Bedienelemente, die das Gerät laut `ptz.cgi?info=1` nicht kann, werden ausgeblendet
-- Statusanzeige SD-Karte, Anzeige/Anlegen einer Daueraufzeichnung
+- **Aufnahmestatus** am Livebild: „Aufnahme läuft“ nur bei einer von der Kamera als laufend gemeldeten Aufnahme. Ein klassisches Daueraufnahmeprofil allein gilt als „konfiguriert“. Dort und in der Speicheranzeige steht auch, wenn die SD-Karte nicht beschreibbar ist.
 
 Kein eigener Server-Prozess: Die Oberfläche spricht direkt die VAPIX-APIs der Kamera an (gleiche Origin, die Anmeldung an der Kamera wird mitverwendet).
 
@@ -45,7 +45,9 @@ Voraussetzung: Docker.
 ./build.sh
 ```
 
-Ergebnis für `v0.1`: `build/Micro_VMS_0_1_0_all.eap` – ein Paket für **armv7hf und aarch64** (reine Web-/Shell-App, kein Kompilieren nötig).
+Ergebnis für Paketversion `0.2.3`: `build/Micro_VMS_0_2_3_all.eap` – ein Paket für **armv7hf und aarch64** (reine Web-/Shell-App, kein Kompilieren nötig).
+
+Gemockte Tests ohne npm-Abhängigkeiten: `node --test tests/app.test.cjs` (Node 22).
 
 ## Installieren
 
@@ -56,7 +58,15 @@ Ergebnis für `v0.1`: `build/Micro_VMS_0_1_0_all.eap` – ein Paket für **armv7
 
 Die frühere App-ID `minivms` wird nicht aktualisiert: AXIS OS behandelt `microvms` als neue App. Alte Lesezeichen müssen auf die neue URL zeigen; Browsereinstellungen bleiben beim Wechsel auf derselben Kamera-Origin erhalten.
 
-Für Aufzeichnungen muss eine SD-Karte/NAS eingerichtet und eine Aufzeichnung konfiguriert sein (Kamera → *Aufzeichnungen* bzw. *System → Speicher*, oder in Micro VMS „Daueraufzeichnung aktivieren“).
+Für Aufzeichnungen muss eine SD-Karte/NAS eingerichtet und eine Aufzeichnung konfiguriert sein (Kamera → *Aufzeichnungen* bzw. *System → Speicher*, oder in Micro VMS **Daueraufnahme starten**).
+
+### Kameratest
+
+1. Paket installieren, App öffnen und mit eingesetzter SD-Karte die Speicheranzeige prüfen. Falls noch nichts aufzeichnet: als Operator/Admin eine Daueraufnahme starten oder sie in AXIS OS einrichten. Prüfen, dass die App erst bei laufender Aufnahme „Aufnahme läuft“ meldet.
+2. Eine bekannte Uhrzeit in der Timeline oder per Datumsfeld öffnen. Direkt danach **Zurück zu Live** wählen. Eine verspätete Suche darf nicht zurück in die Wiedergabe wechseln.
+   Falls Treffer keinem Kanal eindeutig zugeordnet werden können, die graue Spur anklicken und die Aufnahme unter dem Videobild auswählen. Der anschließende Clip-Export verwendet in diesem Modus nur diese eine Aufnahme.
+3. **Letzte 30 s sichern** oder einen Bereich wählen. Zusammenfassung prüfen, Datei herunterladen und Bildinhalt, Zeitraum und Spulbarkeit kontrollieren. Falls möglich, einen Export über eine Aufnahmelücke testen.
+4. Als Betrachter prüfen, dass Livebild und Timeline weiterhin nutzbar sind, auch wenn der Speicherstatus nicht gelesen werden darf. Nach einem Kameraneustart Livebild, laufende Aufnahme und alte Aufnahmen erneut prüfen.
 
 ## Projektstruktur
 
@@ -86,7 +96,8 @@ microvms-acap/
 - Exportformat ist Matroska (`.mkv`, z. B. VLC). MP4-Export wird nicht von allen Geräten unterstützt.
 - Audio ist deaktiviert (`audio=0`), damit Kameras mit G.711/Opus nicht an MSE scheitern.
 - Neuere AXIS OS (12+) können Aufzeichnungen über *Aufzeichnungsgruppen* verwalten. Liste/Wiedergabe/Export funktionieren weiterhin über die obigen APIs, die Anzeige „Daueraufzeichnung“ bezieht sich aber nur auf die klassische Continuous-Recording-API.
+- Die Timeline zählt separat gemeldete Ereignisclips, nicht einzelne Auslösungen innerhalb einer gruppierten Daueraufnahme. Wenn AXIS OS mehrere Aktionen in einer Aufnahme zusammenfasst und dafür keine separaten Clips meldet, lassen sich daraus keine Ereigniszeitpunkte ableiten.
 - Zugriff: Die Seite ist für angemeldete Kamera-Benutzer erreichbar; „Daueraufzeichnung aktivieren“ braucht Operator- oder Admin-Rechte.
-- PTZ: Falls `usergroup.cgi` auf einer Firmware fehlt, wird ersatzweise eine harmlose `ptz.cgi?query=position`-Abfrage probiert. Je nach Firmware kann der Browser dabei für Benutzer ohne PTZ-Rechte einmal einen Anmeldedialog zeigen. Gesteuert wird immer Videokanal 1.
-- Mehrkanal: Aufzeichnungen werden über ihr `source`-Attribut dem Kanal zugeordnet. Ob die Firmware das 1-basiert (wie `camera=N`) oder 0-basiert (wie `Image.I#`) liefert, ist nicht dokumentiert; die App erkennt 0-basiert automatisch, sobald irgendwo `source="0"` auftaucht. Daueraufzeichnung pro Kanal wird mit `camera=N` in den Optionen angelegt (laut Doku sind dort Stream-Parameter erlaubt, `camera` ist aber nicht explizit genannt).
+- PTZ folgt dem gewählten Kanal. Falls `usergroup.cgi` fehlt, prüft die App die Berechtigung ersatzweise per Positionsabfrage für Kanal 1. Je nach Firmware kann dabei einmal ein Anmeldedialog erscheinen.
+- Mehrkanal: Nummerierte Quellen werden nur zugeordnet, wenn die Antwort Hinweise auf 0- oder 1-basierte Nummerierung liefert. `Quad` und mehrdeutige Quellen werden nicht als Aufnahmen eines nummerierten Kanals ausgegeben. Für die klassische Daueraufzeichnung sendet die App `camera=N` in den Stream-Optionen; das muss auf der jeweiligen Firmware geprüft werden.
 - Die `vendorId` im Manifest ist ein Platzhalter.

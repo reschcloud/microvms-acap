@@ -1,10 +1,5 @@
-ARG ARCH=aarch64
-ARG VERSION=12.11.0
-ARG UBUNTU_VERSION=24.04
-ARG REPO=axisecp
-ARG SDK=acap-native-sdk
-
-FROM ${REPO}/${SDK}:${VERSION}-${ARCH}-ubuntu${UBUNTU_VERSION}
+# Keep the base image literal so Dependabot can detect it.
+FROM axisecp/acap-native-sdk:12.11.0-aarch64-ubuntu24.04
 
 # Reine Shell-/Web-App ("architecture": "all") -> ein .eap für armv7hf und aarch64
 COPY ./app /opt/app/

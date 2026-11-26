@@ -1,12 +1,12 @@
 # ADR 0004: Bei Wiedergabewechseln gewinnt die letzte Aktion
 
-**Status:** Vorgeschlagen
+**Status:** Umgesetzt; Kameratest ausstehend
 
 ## Kontext
 
 Pipeline-Callbacks prüfen bereits `state.generation`. `playAt()` und der automatische Übergang zur nächsten Aufnahme warten aber vorher auf eine VAPIX-Aufnahmesuche. Ein altes Ergebnis kann daher nach einem Wechsel zu Live, nach einem weiteren Zeitsprung oder nach einem Kanalwechsel noch den aktuellen Zustand überschreiben.
 
-## Vorschlag
+## Entscheidung
 
 Den Wiedergabewunsch bei Beginn jeder Aktion eindeutig kennzeichnen und den gewählten Kanal für die Anfrage festhalten. Nach asynchronen Schritten nur dann Modus, Meldung oder Pipeline ändern, wenn der Vorgang noch aktuell ist. Ein automatischer Übergang darf nur fortfahren, solange seine ursprüngliche Wiedergabe noch aktiv ist. Alte Anfragen abzubrechen kann Last sparen, ersetzt die Gültigkeitsprüfung aber nicht.
 

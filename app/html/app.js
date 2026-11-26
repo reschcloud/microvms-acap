@@ -23,38 +23,45 @@
   const DAY = 24 * HOUR;
   const LIVE_THRESHOLD = 5000;   // click closer than 5 s to "now" => live
   const SKIP = 30 * 1000;
+  const PAGE_SIZE = 5000;   // one request covers a normal day; larger ranges page below
+  const MAX_PAGES = 10;
   const STORE = 'minivms.';       // preserve preferences on the same camera origin
 
   const state = {
     mode: 'live',                // 'live' | 'playback' | 'paused'
     pipeline: null,
     generation: 0,               // guards against callbacks of old pipelines
+    streamStatus: 'connecting',
+    pendingSeek: null,
+    manualRecording: null,
     rec: null,                   // recording currently playing
     startWall: 0,                // requested start time (ms)
     syncWall: null,              // NTP time of first frame (onSync)
     baseCt: null,                // video.currentTime at first frame (fallback)
     pausedAt: null,
     recordings: [],              // recordings of the selected channel
+    unassignedRecordings: [],
     viewStart: 0,
     viewEnd: 0,
     selStart: null,
     selEnd: null,
     selectMode: false,
-    disks: [],
-    ending: false,
+    disks: null,
+    storageState: 'loading',
+    channelCount: 1,
     channels: [{ camera: 1, name: t('channel.default', { n: 1 }) }],
     channel: 1,                  // VAPIX camera number (1-based)
-    sourceZeroBased: false,      // recordings' "source" attribute 0-based?
+    sourceCatalog: [],
     streamProfiles: [],
   };
 
   // ---------------------------------------------------------------- Utils
 
   const pad = (n, l = 2) => String(n).padStart(l, '0');
-  const isoUtc = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
-  const parseTime = (s) => (s ? Date.parse(s) : null);
-  const recStop = (r) => (r.stop != null ? r.stop : Date.now());
+  const isoUtc = (ms) => new Date(ms).toISOString().replace(/\.000Z$/, 'Z');
+  const recStop = (r) => r.stop ?? (r.status === 'recording' ? Date.now() : r.start);
   const startOfDay = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const shiftDay = (ms, n) => { const d = new Date(ms); d.setDate(d.getDate() + n); return d.getTime(); };
   const store = {
     get(k) { try { return localStorage.getItem(STORE + k); } catch (e) { return null; } },
     set(k, v) { try { localStorage.setItem(STORE + k, v); } catch (e) { /* ignore */ } },
@@ -71,6 +78,10 @@
       : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
   const fmtDateTime = (ms) => `${fmtDate(ms)} ${fmtTime(ms)}`;
+  function fmtOffset(ms) {
+    const offset = -new Date(ms).getTimezoneOffset();
+    return `UTC${offset >= 0 ? '+' : '−'}${pad(Math.trunc(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
+  }
   function fmtStamp(ms) {
     const d = new Date(ms);
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
@@ -94,7 +105,6 @@
     if (n > 1024 ** 3) return `${(n / 1024 ** 3).toFixed(2)} GB`;
     return `${(n / 1024 ** 2).toFixed(1)} MB`;
   }
-  const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   let toastTimer = null;
   function toast(msg, isError = false) {
@@ -114,16 +124,27 @@
   }
 
   async function fetchText(url, opts) {
-    const res = await fetch(url, Object.assign({ credentials: 'same-origin', cache: 'no-store' }, opts));
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText} (${url.split('?')[0]})`);
+    let signal = opts?.signal;
+    if (AbortSignal.timeout && (!signal || AbortSignal.any)) {
+      const timeout = AbortSignal.timeout(12000);
+      signal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    }
+    const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store', ...opts, signal });
+    if (!res.ok) throw Object.assign(new Error(`${res.status} ${res.statusText} (${url.split('?')[0]})`), { status: res.status });
     return res.text();
   }
 
-  async function fetchXml(url) {
-    const text = await fetchText(url);
+  async function fetchXml(url, opts) {
+    const text = await fetchText(url, opts);
     const doc = new DOMParser().parseFromString(text, 'text/xml');
     if (doc.getElementsByTagName('parsererror').length) throw new Error(t('err.xml'));
     return doc;
+  }
+
+  function xmlElement(doc, name) {
+    const el = doc.getElementsByTagName(name)[0];
+    if (!el) throw new Error(t('err.xml'));
+    return el;
   }
 
   async function fetchParams(group) {
@@ -169,12 +190,13 @@
     }
     if (!channels.length) channels.push({ camera: 1, name: t('channel.default', { n: 1 }) });
     state.channels = channels;
+    state.channelCount = Math.max(1, count);
 
     const saved = parseInt(store.get('channel'), 10);
     state.channel = channels.some((c) => c.camera === saved) ? saved : channels[0].camera;
 
     const sel = $('channel');
-    sel.innerHTML = '';
+    sel.replaceChildren();
     for (const c of channels) {
       const o = document.createElement('option');
       o.value = String(c.camera);
@@ -182,10 +204,12 @@
       sel.appendChild(o);
     }
     sel.value = String(state.channel);
-    $('channelWrap').classList.toggle('hidden', channels.length < 2);
+    sel.disabled = channels.length < 2;
+    $('channelLabel').textContent = t('ctl.views', { n: state.channelCount });
+    $('channelWrap').classList.toggle('hidden', !multiChannel());
   }
 
-  const multiChannel = () => state.channels.length > 1;
+  const multiChannel = () => state.channelCount > 1;
   const channelName = (cam = state.channel) => (state.channels.find((c) => c.camera === cam) || {}).name || t('channel.default', { n: cam });
 
   async function loadStreamProfiles() {
@@ -216,106 +240,213 @@
 
   function setChannel(cam) {
     if (cam === state.channel) return;
-    const wall = currentWall();
+    const wall = state.pendingSeek ?? currentWall();
+    const wasLive = state.mode === 'live' && state.pendingSeek == null;
     const prev = state.channel;
     state.channel = cam;
     store.set('channel', String(cam));
     document.dispatchEvent(new CustomEvent('microvms:channel', { detail: { channel: cam, previous: prev } }));
     state.recordings = [];
+    state.unassignedRecordings = [];
     draw();
     refreshRecordings();
+    refreshActiveRecording();
     renderRecordingConfig();
-    if (state.mode === 'live') goLive();
-    else playAt(wall);      // same point in time on the other channel
+    if (wasLive) goLive();
+    else playAt(wall, { clearOldStream: true });
   }
 
   // ------------------------------------------------------------ VAPIX recordings
 
-  function parseRecordings(doc) {
-    return Array.from(doc.getElementsByTagName('recording')).map((el) => {
+  function recordingType(el) {
+    const type = (el.getAttribute('recordingtype') || '').trim().toLowerCase();
+    if (type === 'continuous' || type === 'scheduled') return type;
+    if (type === 'triggered' || type === 'event') return 'triggered';
+    // A missing type with an explicit event trigger is not a continuous recording.
+    // eventid alone is not evidence: continuous profiles may have arbitrary event IDs.
+    const trigger = (el.getAttribute('eventtrigger') || '').trim();
+    return !type && trigger && !/^(?:none|false|0)$/i.test(trigger) ? 'triggered' : 'other';
+  }
+
+  function parseRecordings(container) {
+    return Array.from(container.getElementsByTagName('recording')).map((el) => {
       const video = el.getElementsByTagName('video')[0];
-      const src = el.getAttribute('source') || (video && video.getAttribute('source'));
+      const source = (el.getAttribute('source') || video?.getAttribute('source') || '').trim();
+      const id = el.getAttribute('recordingid');
+      const start = Date.parse(el.getAttribute('starttime'));
+      const end = el.getAttribute('stoptime');
+      const stop = end ? Date.parse(end) : null;
+      const status = el.getAttribute('recordingstatus') || '';
+      if (!id || !Number.isFinite(start) || (stop != null && (!Number.isFinite(stop) || stop < start))) {
+        throw new Error(t('err.xml'));
+      }
       return {
-        id: el.getAttribute('recordingid'),
+        id,
         disk: el.getAttribute('diskid'),
-        start: parseTime(el.getAttribute('starttime')),
-        stop: parseTime(el.getAttribute('stoptime')),
-        type: el.getAttribute('recordingtype') || 'continuous',
-        status: el.getAttribute('recordingstatus') || '',
-        source: src != null && src !== '' ? Number(src) : null,
+        start, stop, status, source,
+        type: recordingType(el),
       };
-    }).filter((r) => r.id && r.start != null);
-  }
-
-  /** Does the recording belong to the selected channel? */
-  function onChannel(r) {
-    if (!multiChannel() || r.source == null || isNaN(r.source)) return true;
-    return (state.sourceZeroBased ? r.source + 1 : r.source) === state.channel;
-  }
-
-  function learnSourceBase(recs) {
-    // Firmware reports "source" either as camera number (1-based) or as Image.I# index (0-based)
-    if (recs.some((r) => r.source === 0)) state.sourceZeroBased = true;
-  }
-
-  async function listRecordings(from, to, max = 5000) {
-    const p = new URLSearchParams({
-      starttime: isoUtc(from),
-      stoptime: isoUtc(to),
-      sortorder: 'ascending',
-      maxnumberofresults: String(max),
     });
-    const recs = parseRecordings(await fetchXml(`/axis-cgi/record/list.cgi?${p}`));
-    learnSourceBase(recs);
-    return recs.filter(onChannel);
   }
 
-  async function findRecordingAtOrAfter(time) {
-    const p = new URLSearchParams({ starttime: isoUtc(time), sortorder: 'ascending', maxnumberofresults: String(20 * state.channels.length) });
-    const all = parseRecordings(await fetchXml(`/axis-cgi/record/list.cgi?${p}`));
-    learnSourceBase(all);
-    const recs = all.filter(onChannel).sort((a, b) => a.start - b.start);
-    // Prefer the recording containing the time; on overlap (continuous + event) the continuous one.
-    const containing = recs.filter((r) => r.start <= time && time < recStop(r));
-    if (containing.length) return containing.find((r) => r.type === 'continuous') || containing[0];
-    return recs.find((r) => r.start > time) || null;
+  async function loadRecordingSources() {
+    if (!multiChannel()) return;
+    try {
+      const doc = await fetchXml('/axis-cgi/record/list.cgi?listentity=source');
+      state.sourceCatalog = Array.from(xmlElement(doc, 'sources').getElementsByTagName('source'), (el) => el.textContent.trim());
+    } catch (e) { /* some cameras don't report source identifiers */ }
+  }
+
+  function selectChannel(rows, channel) {
+    const count = state.channelCount;
+    const evidence = new Set([...state.sourceCatalog, ...rows.map((r) => r.source)]);
+    const zero = evidence.has('0');
+    const one = evidence.has(String(count));
+    // A device that knows only one numbered source records just one channel: the first enabled one.
+    const numbered = [...evidence].filter((s) => /^\d+$/.test(s));
+    const sole = numbered.length === 1 && state.sourceCatalog.includes(numbered[0]) ? numbered[0] : null;
+    const recs = [], unknown = [];
+    for (const r of rows) {
+      if (/^quad$/i.test(r.source)) continue; // not one of the numbered channels
+      if (!multiChannel()) { recs.push(r); continue; }
+      const n = /^\d+$/.test(r.source) ? Number(r.source) : NaN;
+      const mapped = zero !== one ? n + (zero ? 1 : 0) : r.source === sole ? state.channels[0].camera : NaN;
+      if (mapped >= 1 && mapped <= count) {
+        if (mapped === channel) recs.push(r);
+      } else if (!Number.isFinite(n) || n > count || n === channel || n + 1 === channel) {
+        unknown.push(r);
+      }
+    }
+    return { recs, unknown };
+  }
+
+  async function listRecordings(from, to, { channel = state.channel, signal } = {}) {
+    if (to != null && to < from) return { recs: [], unknown: [], complete: true };
+    const p = new URLSearchParams({ starttime: isoUtc(from), sortorder: 'ascending', maxnumberofresults: String(PAGE_SIZE) });
+    if (to != null) p.set('stoptime', isoUtc(to));
+    const seen = new Map();
+    for (let page = 0; ; page++) {
+      signal?.throwIfAborted();
+      // Axis pages with the index of the first result; IDs deduplicate an overlapping boundary.
+      if (page) p.set('startatresultnumber', String(seen.size));
+      const doc = await fetchXml(`/axis-cgi/record/list.cgi?${p}`, { signal });
+      const container = doc.getElementsByTagName('recordings')[0];
+      const rows = parseRecordings(doc);
+      const before = seen.size;
+      for (const r of rows) seen.set(`${r.disk}/${r.id}`, r);
+      const selected = selectChannel([...seen.values()], channel);
+      const raw = container?.getAttribute('numberofrecordings');
+      const reported = raw && /^\d+$/.test(raw) ? Number(raw) : null;
+      // Only ask for another page when this one was full and the camera reports more.
+      const more = rows.length >= PAGE_SIZE && (reported == null || seen.size < reported);
+      if (!more) return { ...selected, complete: true };
+      // A camera that ignores startatresultnumber must not blank the whole timeline.
+      if (seen.size === before || page + 1 >= MAX_PAGES) return { ...selected, complete: false };
+    }
+  }
+
+  async function findRecordingAtOrAfter(time, options, exclude) {
+    const p = new URLSearchParams({ starttime: isoUtc(time), sortorder: 'ascending', maxnumberofresults: '200' });
+    const doc = await fetchXml(`/axis-cgi/record/list.cgi?${p}`, { signal: options.signal });
+    const different = (r) => !exclude || r.id !== exclude.id || r.disk !== exclude.disk;
+    const overlaps = (r) => different(r) && r.start <= time && time < recStop(r);
+    const { recs, unknown } = selectChannel(parseRecordings(doc), options.channel);
+    const containing = recs.filter(overlaps);
+    const choices = unknown.filter(overlaps);
+    if (options.preferUnassigned && choices.length) return { choices };
+    if (containing.length) return { rec: containing.find((r) => r.type === 'continuous') || containing[0] };
+    if (choices.length) return { choices };
+    const later = (r) => different(r) && r.start > time && r.start <= Date.now() && recStop(r) > r.start;
+    const next = recs.find(later);
+    const earlier = unknown.filter((r) => later(r) && (!next || r.start <= next.start));
+    return earlier.length ? { choices: earlier } : { rec: next };
   }
 
   // ------------------------------------------------------------ Pipeline
 
+  let playbackIntent = null;
+  let endingIntent = null;
+  let streamTimer = null;
+
+  function newPlaybackIntent() {
+    playbackIntent?.abort();
+    playbackIntent = new AbortController();
+    state.pendingSeek = null;
+    state.manualRecording = null;
+    $('sourceChoices').classList.add('hidden');
+    $('sourceChoiceList').replaceChildren();
+    return playbackIntent;
+  }
+
+  const isCurrentIntent = (intent) => playbackIntent === intent && !intent.signal.aborted;
+
   function stopPipeline() {
     state.generation++;
+    clearTimeout(streamTimer);
     if (state.pipeline) {
       try { state.pipeline.close(); } catch (e) { /* ignore */ }
       state.pipeline = null;
     }
   }
 
-  function startPipeline(parameters, offsetSec) {
+  function setStreamStatus(status, msg = '') {
+    state.streamStatus = status;
+    videoMsg(state.pendingSeek == null ? msg : t('video.seeking'));
+    updateModeUi();
+  }
+
+  function startPipeline(parameters, offsetSec, retryLive = true) {
     stopPipeline();
     const gen = state.generation;
     const video = $('video');
     state.syncWall = null;
     state.baseCt = null;
-
-    const pipeline = new MSL.Html5VideoPipeline({
-      ws: {},                        // default: ws(s)://<camera>/rtsp-over-websocket
-      rtsp: { parameters },          // rtsp://<camera>/axis-media/media.amp?...
-      mediaElement: video,
-    });
-    state.pipeline = pipeline;
+    setStreamStatus('connecting', t('video.connecting'));
+    if (!MSL?.Html5VideoPipeline) { setStreamStatus('error', t('video.libMissing')); return; }
+    const fail = (msg, reconnect = false) => {
+      if (gen !== state.generation) return;
+      const lastWall = currentWall();
+      stopPipeline();
+      if (reconnect && (retryLive || state.streamStatus === 'playing') && state.mode === 'live' && state.pendingSeek == null) {
+        setStreamStatus('connecting', t('video.reconnect'));
+        const intent = playbackIntent;
+        const closedGen = state.generation;
+        streamTimer = setTimeout(() => {
+          if (state.generation === closedGen && isCurrentIntent(intent)) goLive(false);
+        }, 2000);
+      } else {
+        if (state.mode === 'playback') {
+          state.startWall = lastWall;
+          state.syncWall = state.baseCt = null;
+        }
+        setStreamStatus('error', msg);
+      }
+    };
+    let pipeline;
+    try {
+      pipeline = new MSL.Html5VideoPipeline({
+        ws: {},                      // default: ws(s)://<camera>/rtsp-over-websocket
+        rtsp: { parameters },        // rtsp://<camera>/axis-media/media.amp?...
+        mediaElement: video,
+      });
+      state.pipeline = pipeline;
+    } catch (err) {
+      fail(t('video.connectFailed', { msg: err.message }));
+      return;
+    }
+    streamTimer = setTimeout(() => fail(t('video.timeout')), 15000);
 
     pipeline.onSync = (ntp) => { if (gen === state.generation) state.syncWall = ntp; };
     pipeline.onServerClose = () => {
       if (gen !== state.generation) return;
-      if (state.mode === 'live') {
-        videoMsg(t('video.reconnect'));
-        setTimeout(() => { if (gen === state.generation) goLive(); }, 2000);
+      if (state.mode === 'playback' && state.pendingSeek == null && state.rec?.stop != null && Math.abs(currentWall() - state.rec.stop) < 2000) {
+        onRecordingEnded();
+      } else {
+        fail(t('video.disconnected'), true);
       }
     };
     pipeline.rtsp.onError = (err) => {
-      if (gen !== state.generation) return;
-      videoMsg(t('video.rtspError', { msg: err.message || err }));
+      fail(t('video.rtspError', { msg: err.message || err }));
     };
     pipeline.rtsp.onRtcp = (rtcp) => {
       if (gen !== state.generation) return;
@@ -326,11 +457,10 @@
       .then(() => {
         if (gen !== state.generation) return;
         pipeline.rtsp.play(offsetSec || 0);
-        video.play().catch(() => { /* muted autoplay should work */ });
+        return video.play();
       })
       .catch((err) => {
-        if (gen !== state.generation) return;
-        videoMsg(t('video.connectFailed', { msg: err && err.message ? err.message : t('video.wsError') }));
+        fail(t('video.connectFailed', { msg: err?.message || t('video.wsError') }));
       });
   }
 
@@ -345,66 +475,111 @@
     return params;
   }
 
-  function goLive() {
+  function goLive(retryLive = true) {
+    newPlaybackIntent();
     state.mode = 'live';
     state.rec = null;
     state.pausedAt = null;
-    videoMsg('');
-    startPipeline(liveParameters(), 0);
-    updateModeUi();
+    startPipeline(liveParameters(), 0, retryLive);
   }
 
-  async function playAt(time) {
-    if (time >= Date.now() - LIVE_THRESHOLD) { goLive(); return; }
-    let rec;
-    try {
-      rec = await findRecordingAtOrAfter(time);
-    } catch (e) {
-      toast(t('toast.recListFailed', { msg: e.message }), true);
+  function holdAt(time, msg) {
+    stopPipeline();
+    state.mode = 'paused';
+    state.rec = null;
+    state.pausedAt = time;
+    setStreamStatus('idle', msg);
+  }
+
+  function startRecording(rec, time) {
+    state.mode = 'playback';
+    state.rec = rec;
+    state.startWall = time;
+    state.pausedAt = null;
+    $('jumpTime').value = toLocalInput(time);
+    startPipeline([`recordingid=${encodeURIComponent(rec.id)}`, 'audio=0'], Math.max(0, (time - rec.start) / 1000));
+  }
+
+  function offerRecordings(intent, time, choices) {
+    holdAt(time, t('video.chooseSource'));
+    const list = $('sourceChoiceList');
+    for (const [i, rec] of choices.slice(0, 12).entries()) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = t('video.sourceChoice', {
+        n: i + 1, when: fmtDateTime(rec.start), source: rec.source || t('video.sourceMissing'),
+      });
+      button.addEventListener('click', () => {
+        if (!isCurrentIntent(intent)) return;
+        newPlaybackIntent();
+        state.manualRecording = rec;
+        startRecording(rec, Math.max(rec.start, time));
+      });
+      list.appendChild(button);
+    }
+    $('sourceChoiceHint').textContent = t(choices.length > 12 ? 'video.sourceLimited' : 'video.sourceHint');
+    $('sourceChoices').classList.remove('hidden');
+  }
+
+  async function playAt(time, { clearOldStream = false, reuseManual = false, preferUnassigned = false } = {}) {
+    if (!Number.isFinite(time)) return;
+    const manual = reuseManual ? state.manualRecording : null;
+    if (manual && manual.start <= time && time < recStop(manual)) {
+      newPlaybackIntent();
+      state.manualRecording = manual;
+      startRecording(manual, time);
       return;
     }
+    if (time >= Date.now() - LIVE_THRESHOLD) { goLive(); return; }
+    const intent = newPlaybackIntent();
+    const channel = state.channel;
+    if (clearOldStream) stopPipeline();
+    state.pendingSeek = time;
+    videoMsg(t('video.seeking'));
+    updateModeUi();
+    let result;
+    try {
+      result = await findRecordingAtOrAfter(time, { channel, signal: intent.signal, preferUnassigned });
+    } catch (e) {
+      if (!isCurrentIntent(intent)) return;
+      state.pendingSeek = null;
+      holdAt(time, t('toast.recListFailed', { msg: e.message }));
+      return;
+    }
+    if (!isCurrentIntent(intent)) return;
+    state.pendingSeek = null;
+    if (result.choices) { offerRecordings(intent, time, result.choices); return; }
+    const { rec } = result;
     if (!rec) {
-      stopPipeline();
-      state.mode = 'paused';
-      state.pausedAt = time;
-      updateModeUi();
-      videoMsg(t('video.noRecordingFrom', { when: fmtDateTime(time) }));
+      holdAt(time, t('video.noRecordingFrom', { when: fmtDateTime(time) }));
       return;
     }
     if (rec.start > time) {
       toast(t('toast.jumpTo', { time: fmtTime(rec.start) }));
       time = rec.start;
     }
-    const offset = Math.max(0, (time - rec.start) / 1000);
-    state.mode = 'playback';
-    state.rec = rec;
-    state.startWall = time;
-    state.pausedAt = null;
-    videoMsg('');
-    startPipeline([`recordingid=${encodeURIComponent(rec.id)}`, 'audio=0'], offset);
-    updateModeUi();
+    startRecording(rec, time);
   }
 
   async function onRecordingEnded() {
-    if (state.ending) return;
-    state.ending = true;
-    try { await handleRecordingEnd(); } finally { state.ending = false; }
-  }
-
-  async function handleRecordingEnd() {
-    const end = state.rec ? recStop(state.rec) : currentWall();
+    const intent = playbackIntent;
+    const rec = state.rec;
+    if (!rec || state.mode !== 'playback' || state.pendingSeek != null || endingIntent === intent) return;
+    const end = rec.stop ?? currentWall();
+    if (state.manualRecording) { holdAt(end, t('video.endOfRecording')); return; }
+    endingIntent = intent;
+    const channel = state.channel;
     try {
-      const next = await findRecordingAtOrAfter(end + 1000);
-      if (next && (!state.rec || next.id !== state.rec.id)) {
-        await playAt(Math.max(next.start, end));
-        return;
-      }
-    } catch (e) { /* ignore */ }
-    stopPipeline();
-    state.mode = 'paused';
-    state.pausedAt = end;
-    updateModeUi();
-    videoMsg(t('video.endOfRecording'));
+      const { rec: next, choices } = await findRecordingAtOrAfter(end, { channel, signal: intent.signal }, rec);
+      if (!isCurrentIntent(intent)) return;
+      if (next) startRecording(next, Math.max(next.start, end));
+      else if (choices) offerRecordings(intent, end, choices);
+      else holdAt(end, t('video.endOfRecording'));
+    } catch (e) {
+      if (isCurrentIntent(intent)) holdAt(end, t('toast.recListFailed', { msg: e.message }));
+    } finally {
+      if (endingIntent === intent) endingIntent = null;
+    }
   }
 
   /** Point in time currently shown (wall clock, ms). */
@@ -422,34 +597,56 @@
   }
 
   $('video').addEventListener('playing', () => {
+    if (!state.pipeline) return;
+    clearTimeout(streamTimer);
     if (state.baseCt == null) state.baseCt = $('video').currentTime || 0;
+    setStreamStatus('playing');
   });
 
   function togglePause() {
+    if (state.pendingSeek != null) {
+      const time = state.pendingSeek;
+      newPlaybackIntent();
+      holdAt(time, '');
+      return;
+    }
     if (state.mode === 'paused') {
-      if (state.pausedAt != null) playAt(state.pausedAt); else goLive();
+      if (state.pausedAt != null) playAt(state.pausedAt, { reuseManual: true }); else goLive();
       return;
     }
     const time = currentWall();
-    stopPipeline();
+    const manual = state.manualRecording;
+    newPlaybackIntent();
+    state.manualRecording = manual;
     $('video').pause();
-    state.mode = 'paused';
-    state.pausedAt = time;
-    updateModeUi();
+    holdAt(time, '');
   }
 
+  let announcedMode;
   function updateModeUi() {
-    const live = state.mode === 'live';
+    const seeking = state.pendingSeek != null;
+    const live = state.mode === 'live' && !seeking;
+    const playing = state.streamStatus === 'playing';
+    const paused = state.mode === 'paused' && !seeking;
+    const key = seeking ? 'seeking' : paused ? 'paused' : !playing ? state.streamStatus : state.mode;
     const badge = $('modeBadge');
-    badge.className = 'badge ' + (live ? 'live' : 'playback');
-    badge.textContent = live ? t('badge.live') : state.mode === 'paused' ? t('badge.paused') : t('badge.playback');
-    $('btnPause').textContent = state.mode === 'paused' ? '▶' : '⏸';
+    badge.className = `badge ${key}`;
+    badge.textContent = t(`badge.${key}`);
+    $('manualSourceInfo').textContent = state.manualRecording ? t('video.manualSource') : '';
+    $('manualSourceInfo').classList.toggle('hidden', !state.manualRecording);
+    $('btnPause').textContent = paused ? '▶' : '⏸';
     $('btnFwd').disabled = live;
+    $('btnSnapshot').disabled = !live || !playing;
+    $('btnRetryPlayback').classList.toggle('hidden', seeking || state.mode !== 'playback' || state.streamStatus !== 'error');
     const lb = $('btnLive');
-    lb.disabled = live;
-    lb.classList.toggle('is-live', live);
-    lb.textContent = live ? t('live.btn') : t('live.back');
-    document.dispatchEvent(new CustomEvent('microvms:mode', { detail: { mode: state.mode } }));
+    lb.disabled = live && playing;
+    lb.classList.toggle('is-live', lb.disabled);
+    lb.textContent = live ? t(playing ? 'live.btn' : 'live.retry') : t('live.back');
+    const mode = live && !playing ? state.streamStatus : seeking ? 'seeking' : state.mode;
+    if (mode !== announcedMode) {
+      announcedMode = mode;
+      document.dispatchEvent(new CustomEvent('microvms:mode', { detail: { mode } }));
+    }
   }
 
   // ------------------------------------------------------------ Timeline
@@ -465,6 +662,7 @@
     continuous: cssVar('--continuous', '#3b82f6'),
     triggered: cssVar('--triggered', '#f59e0b'),
     scheduled: cssVar('--scheduled', '#a855f7'),
+    other: cssVar('--other', '#60c8bd'),
     sel: cssVar('--sel', 'rgba(255,204,51,.25)'),
     accent: cssVar('--accent', '#ffcc33'),
     live: cssVar('--live', '#e5484d'),
@@ -474,6 +672,35 @@
   const canvasWidth = () => canvas.clientWidth;
   const xOf = (time) => ((time - state.viewStart) / (state.viewEnd - state.viewStart)) * canvasWidth();
   const tOf = (x) => state.viewStart + (x / canvasWidth()) * (state.viewEnd - state.viewStart);
+  const TIMELINE_TYPES = ['continuous', 'triggered', 'scheduled', 'other'];
+
+  function trackGeometry(type) {
+    const top = 25;
+    const laneHeight = (canvas.clientHeight - top - 14) / TIMELINE_TYPES.length;
+    return { y: top + TIMELINE_TYPES.indexOf(type) * laneHeight, height: laneHeight };
+  }
+
+  function recordingPixels(rec) {
+    const end = recStop(rec);
+    if (end <= state.viewStart || rec.start >= state.viewEnd || end <= rec.start) return null;
+    const left = Math.max(0, xOf(rec.start));
+    const length = Math.min(canvasWidth(), xOf(end)) - left;
+    return { left, width: Math.max(rec.type === 'continuous' ? 1 : 4, length) };
+  }
+
+  function timelineRecordingAt(x, y, time) {
+    const type = TIMELINE_TYPES.find((kind) => {
+      const lane = trackGeometry(kind);
+      return y >= lane.y && y < lane.y + lane.height;
+    });
+    if (!type || type === 'continuous') return null; // ordinary timeline seek prefers continuous footage
+    const matches = state.recordings.filter((r) => {
+      if (r.type !== type) return false;
+      const pixels = recordingPixels(r);
+      return pixels && x >= pixels.left && x < pixels.left + pixels.width;
+    });
+    return matches.find((r) => r.start <= time && time < recStop(r)) || matches[0] || null;
+  }
 
   function resizeCanvas() {
     const dpr = window.devicePixelRatio || 1;
@@ -487,8 +714,6 @@
     const W = canvas.clientWidth;
     const H = canvas.clientHeight;
     const span = state.viewEnd - state.viewStart;
-    const trackTop = 26;
-    const trackH = H - trackTop - 14;
     const now = Date.now();
 
     ctx.clearRect(0, 0, W, H);
@@ -503,6 +728,7 @@
 
     const step = TICK_STEPS.find((s) => (W / (span / s)) >= 70) || DAY;
     const tzOffset = new Date(state.viewStart).getTimezoneOffset() * MIN;
+    const changesOffset = new Date(state.viewEnd).getTimezoneOffset() * MIN !== tzOffset;
     let tick = Math.ceil((state.viewStart - tzOffset) / step) * step + tzOffset;
     ctx.font = '11px system-ui, sans-serif';
     ctx.textBaseline = 'top';
@@ -513,16 +739,23 @@
       ctx.strokeStyle = isMidnight ? COLORS.text : COLORS.line;
       ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, H); ctx.stroke();
       ctx.fillStyle = COLORS.text;
-      ctx.fillText(isMidnight ? fmtDate(tick) : fmtTime(tick, step < MIN * 1.5), x + 3, 4);
+      const hour = fmtTime(tick, step < MIN * 1.5);
+      ctx.fillText(isMidnight ? fmtDate(tick) : changesOffset ? `${hour} ${fmtOffset(tick)}` : hour, x + 3, 4);
     }
 
-    for (const r of state.recordings) {
+    for (const r of state.unassignedRecordings) {
       const x1 = Math.max(0, xOf(r.start));
       const x2 = Math.min(W, xOf(recStop(r)));
-      if (x2 < 0 || x1 > W) continue;
-      ctx.fillStyle = COLORS[r.type] || COLORS.continuous;
-      if (r.type === 'continuous') ctx.fillRect(x1, trackTop, Math.max(1, x2 - x1), trackH);
-      else ctx.fillRect(x1, trackTop, Math.max(2, x2 - x1), Math.round(trackH * 0.4));
+      if (x2 <= x1) continue;
+      ctx.fillStyle = COLORS.text;
+      ctx.fillRect(x1, H - 12, Math.max(1, x2 - x1), 3);
+    }
+    for (const r of state.recordings) {
+      const pixels = recordingPixels(r);
+      if (!pixels) continue;
+      const lane = trackGeometry(r.type);
+      ctx.fillStyle = COLORS[r.type];
+      ctx.fillRect(pixels.left, lane.y + 1, pixels.width, lane.height - 3);
     }
 
     if (state.selStart != null && state.selEnd != null) {
@@ -556,7 +789,8 @@
     if (fetch) scheduleFetch();
   }
 
-  const showDay = (dayStart) => setView(dayStart, dayStart + DAY);
+  const showDay = (dayStart) => setView(dayStart, shiftDay(dayStart, 1));
+  const stepDay = (n) => showDay(shiftDay(startOfDay((state.viewStart + state.viewEnd) / 2), n));
 
   function zoom(factor, anchorT) {
     const a = anchorT != null ? anchorT : (state.viewStart + state.viewEnd) / 2;
@@ -564,38 +798,66 @@
   }
 
   let fetchTimer = null;
-  let fetchSeq = 0;
+  let timelineRequest = null;
+  const timelineStatus = (msg) => { if ($('timelineStatus').textContent !== msg) $('timelineStatus').textContent = msg; };
+  function showTimelineCounts(rows = []) {
+    const events = rows.filter((r) => r.type === 'triggered').length;
+    const other = rows.some((r) => r.type === 'other');
+    const label = rows.length ? t('tl.eventCount', { n: events }) : '';
+    if ($('timelineEvents').textContent !== label) $('timelineEvents').textContent = label;
+    $('otherSwatch').classList.toggle('hidden', !other);
+    $('otherLegend').classList.toggle('hidden', !other);
+  }
   function scheduleFetch() {
     clearTimeout(fetchTimer);
-    fetchTimer = setTimeout(refreshRecordings, 250);
+    timelineRequest?.abort();
+    timelineStatus(t('tl.loading'));
+    showTimelineCounts();
+    fetchTimer = setTimeout(() => refreshRecordings(), 250);
   }
 
-  async function refreshRecordings() {
-    const seq = ++fetchSeq;
-    const margin = (state.viewEnd - state.viewStart) * 0.5;
+  async function refreshRecordings(background = false) {
+    clearTimeout(fetchTimer);
+    timelineRequest?.abort();
+    const request = new AbortController();
+    timelineRequest = request;
+    const { viewStart, viewEnd, channel } = state;
+    const margin = (viewEnd - viewStart) * 0.5;
+    if (!background) { timelineStatus(t('tl.loading')); showTimelineCounts(); }
     try {
-      const recs = await listRecordings(state.viewStart - margin, Math.min(state.viewEnd + margin, Date.now() + HOUR));
-      if (seq !== fetchSeq) return;
+      const { recs, unknown, complete } = await listRecordings(viewStart - margin, Math.min(viewEnd + margin, Date.now()), { channel, signal: request.signal });
+      if (request.signal.aborted) return;
+      const visible = (r) => r.start < viewEnd && recStop(r) > viewStart;
       state.recordings = recs;
+      state.unassignedRecordings = unknown;
+      showTimelineCounts(recs.filter(visible));
+      timelineStatus(!complete ? t('tl.partial')
+        : unknown.some(visible) ? t('tl.unknown')
+        : recs.some(visible) ? '' : t('tl.empty'));
       draw();
     } catch (e) {
-      if (seq === fetchSeq) toast(t('toast.timeline', { msg: e.message }), true);
+      if (!request.signal.aborted) {
+        timelineStatus(t('toast.timeline', { msg: e.message }));
+        showTimelineCounts();
+      }
     }
   }
 
   let drag = null;
   canvas.addEventListener('pointerdown', (ev) => {
+    if (!ev.isPrimary || ev.button !== 0) return;
     canvas.setPointerCapture(ev.pointerId);
     const selecting = state.selectMode || ev.shiftKey;
-    drag = { x0: ev.offsetX, view0: [state.viewStart, state.viewEnd], moved: false, selecting, t0: tOf(ev.offsetX) };
+    drag = { id: ev.pointerId, x0: ev.offsetX, view0: [state.viewStart, state.viewEnd], moved: false, selecting, t0: tOf(ev.offsetX) };
     if (selecting) canvas.classList.add('selecting');
   });
   canvas.addEventListener('pointermove', (ev) => {
     const tip = $('tlTooltip');
-    tip.textContent = fmtDateTime(tOf(ev.offsetX));
+    const at = tOf(ev.offsetX);
+    tip.textContent = `${fmtDateTime(at)} ${fmtOffset(at)}`;
     tip.style.left = `${ev.offsetX}px`;
     tip.classList.remove('hidden');
-    if (!drag) return;
+    if (drag?.id !== ev.pointerId) return;
     const dx = ev.offsetX - drag.x0;
     if (Math.abs(dx) > 3) drag.moved = true;
     if (!drag.moved) return;
@@ -610,11 +872,25 @@
     }
   });
   canvas.addEventListener('pointerup', (ev) => {
-    if (!drag) return;
+    if (drag?.id !== ev.pointerId) return;
     const d = drag;
     drag = null;
     canvas.classList.toggle('selecting', state.selectMode);
-    if (!d.moved && !d.selecting) playAt(tOf(ev.offsetX));
+    if (!d.moved && !d.selecting) {
+      const time = Math.round(tOf(ev.offsetX));
+      const rec = timelineRecordingAt(ev.offsetX, ev.offsetY, time);
+      if (rec) {
+        newPlaybackIntent();
+        startRecording(rec, Math.max(rec.start, Math.min(time, recStop(rec) - 1)));
+      } else {
+        playAt(time, { preferUnassigned: ev.offsetY >= canvas.clientHeight - 14 });
+      }
+    }
+  });
+  for (const type of ['pointercancel', 'lostpointercapture']) canvas.addEventListener(type, (ev) => {
+    if (drag?.id !== ev.pointerId) return;
+    drag = null;
+    canvas.classList.toggle('selecting', state.selectMode);
   });
   canvas.addEventListener('pointerleave', () => $('tlTooltip').classList.add('hidden'));
   canvas.addEventListener('wheel', (ev) => {
@@ -630,17 +906,28 @@
     const b = Math.max(state.selStart, state.selEnd);
     $('expStart').value = toLocalInput(a);
     $('expEnd').value = toLocalInput(b);
-    $('expInfo').textContent = t('exp.duration', { d: fmtDuration(b - a) });
+    dragExportRange = { a, b, startInput: $('expStart').value, endInput: $('expEnd').value };
+    if (!exportAbort) $('expInfo').textContent = t('exp.duration', { d: fmtDuration(b - a) });
   }
 
   function selectionFromInputs() {
-    const a = fromLocalInput($('expStart').value);
-    const b = fromLocalInput($('expEnd').value);
-    if (!isNaN(a) && !isNaN(b)) {
-      state.selStart = a; state.selEnd = b;
-      $('expInfo').textContent = b > a ? t('exp.duration', { d: fmtDuration(b - a) }) : t('exp.endBeforeStart');
-      draw();
-    }
+    const [a, b] = selectedExportRange();
+    state.selStart = Number.isFinite(a) && b > a ? a : null;
+    state.selEnd = state.selStart == null ? null : b;
+    if (!exportAbort) $('expInfo').textContent = !Number.isFinite(a) || !Number.isFinite(b) ? ''
+      : b > a ? t('exp.duration', { d: fmtDuration(b - a) }) : t('exp.endBeforeStart');
+    draw();
+  }
+
+  // A timeline selection is absolute, even during the repeated local hour in autumn.
+  let dragExportRange = null;
+  function selectedExportRange() {
+    const startInput = $('expStart').value;
+    const endInput = $('expEnd').value;
+    return [
+      dragExportRange?.startInput === startInput ? dragExportRange.a : fromLocalInput(startInput),
+      dragExportRange?.endInput === endInput ? dragExportRange.b : fromLocalInput(endInput),
+    ];
   }
 
   let exportAbort = null;
@@ -664,111 +951,138 @@
     const list = $('expLinks');
     list.innerHTML = '';
     chosen.forEach((c, i) => {
-      const url = exportUrl(c, `${base}_${fmtStamp(c.s)}`, pw);
+      const suffix = chosen.length === 1 ? '' : `_${pad(i + 1, String(chosen.length).length)}`;
+      const url = exportUrl(c, `${base}_${fmtStamp(c.s)}${suffix}`, pw);
       const li = document.createElement('li');
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = '';
+      const link = document.createElement(pw ? 'button' : 'a');
+      if (pw) link.addEventListener('click', () => download(url, ''));
+      else { link.href = url; link.download = ''; }
       link.textContent = `${fmtDateTime(c.s)} – ${fmtTime(c.e)} (${fmtDuration(c.e - c.s)})`;
       li.appendChild(link);
       list.appendChild(li);
-      setTimeout(() => download(url, ''), i * 1500);   // staggered: browsers block bursts
+      if (i === 0) download(url, ''); // further parts are explicit links; browsers can block download bursts
     });
   }
 
   /** Load parts one after another and merge them into ONE .mkv in the browser. */
-  async function exportMerged(chosen, base, a) {
-    exportAbort = new AbortController();
-    const signal = exportAbort.signal;
-    $('btnCancelExport').classList.remove('hidden');
+  async function exportMerged(chosen, base, signal, clipChannel) {
+    const a = chosen[0].s;
     const sources = chosen.map((c, i) => async () => {
       const res = await fetch(exportUrl(c, `${base}_part${i + 1}`, null), { credentials: 'same-origin', signal });
-      if (!res.ok || !res.body) throw new Error(t('exp.partFailed', { n: i + 1, status: res.status }));
+      const type = res.headers.get('content-type') || '';
+      if (!res.ok || !res.body || /xml|html|json|text\/plain/i.test(type)) {
+        await res.body?.cancel();
+        throw new Error(t('exp.partFailed', { n: i + 1, status: res.status }));
+      }
       return res.body;
     });
-    try {
-      const titleParts = [$('deviceName').textContent || 'Axis'];
-      if (multiChannel()) titleParts.push(channelName());
-      titleParts.push(fmtDateTime(a));
-      const result = await window.MkvConcat.concat(sources, {
-        startTimeMs: a,
-        title: titleParts.join(' – '),
-        onProgress: ({ part, parts, bytes }) => {
-          $('expInfo').textContent = t('exp.loading', { part, parts, bytes: fmtBytes(bytes) });
-        },
-      });
-      const url = URL.createObjectURL(result.blob);
-      const name = `${base}_${fmtStamp(a)}.mkv`;
-      download(url, name);
-      const li = document.createElement('li');
-      const link = document.createElement('a');
-      link.href = url; link.download = name;
-      link.textContent = `${name} (${fmtBytes(result.blob.size)}, ${fmtDuration(result.durationMs)})`;
-      li.appendChild(link);
-      $('expLinks').appendChild(li);
-      setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
-      $('expInfo').textContent = t('exp.done', { n: chosen.length });
-    } finally {
-      exportAbort = null;
-      $('btnCancelExport').classList.add('hidden');
-    }
+    const titleParts = [$('deviceName').textContent || 'Axis'];
+    if (clipChannel) titleParts.push(clipChannel);
+    const result = await window.MkvConcat.concat(sources, {
+      // A cropped camera export can start at a preceding keyframe, so don't assert its actual DateUTC.
+      startTimeMs: a === chosen[0].r.start ? a : undefined,
+      title: titleParts.join(' – '),
+      onProgress: ({ part, parts, bytes }) => {
+        $('expInfo').textContent = t('exp.loading', { part, parts, bytes: fmtBytes(bytes) });
+      },
+    });
+    signal.throwIfAborted();
+    const url = URL.createObjectURL(result.blob);
+    const name = `${base}_${fmtStamp(a)}.mkv`;
+    download(url, name);
+    const li = document.createElement('li');
+    const link = document.createElement('a');
+    link.href = url; link.download = name;
+    link.textContent = `${name} (${fmtBytes(result.blob.size)}, ${fmtDuration(result.durationMs)})`;
+    li.appendChild(link);
+    $('expLinks').appendChild(li);
+    setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
+    $('expInfo').textContent = t('exp.done', { n: chosen.length });
   }
 
-  async function doExport() {
-    const a = fromLocalInput($('expStart').value);
-    const b = Math.min(fromLocalInput($('expEnd').value), Date.now());
-    if (isNaN(a) || isNaN(b) || b <= a) { toast(t('exp.invalidRange'), true); return; }
-    if (b - a > 6 * HOUR && !confirm(t('exp.confirmLarge', { d: fmtDuration(b - a) }))) return;
+  function planExport(recs, a, b) {
+    const nonOverlapping = (rows) => {
+      let end = a;
+      const parts = [];
+      for (const r of rows) {
+        const s = Math.max(end, r.start), e = Math.min(b, recStop(r));
+        if (e > s) { parts.push({ r, s, e }); end = e; }
+      }
+      return parts;
+    };
+    const sorted = recs.slice().sort((x, y) => x.start - y.start);
+    const continuous = nonOverlapping(sorted.filter((r) => r.type === 'continuous'));
+    const other = nonOverlapping(sorted.filter((r) => r.type !== 'continuous'));
+    const parts = [...continuous];
+    let i = 0;
+    for (const { r, s, e } of other) {
+      let start = s;
+      while (i < continuous.length && continuous[i].e <= start) i++;
+      while (i < continuous.length && continuous[i].s < e) {
+        const cut = continuous[i];
+        if (cut.s > start) parts.push({ r, s: start, e: cut.s });
+        start = Math.max(start, cut.e);
+        if (start >= e) break;
+        i++;
+      }
+      if (start < e) parts.push({ r, s: start, e });
+    }
+    return parts.sort((x, y) => x.s - y.s);
+  }
+
+  async function doExport(a, requestedEnd) {
+    if (exportAbort) return;
+    const b = Math.min(requestedEnd, Date.now());
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) { toast(t('exp.invalidRange'), true); return; }
 
     const usePw = $('expPwEnable').checked;
-    const pw = $('expPw').value;
+    const pw = usePw ? $('expPw').value : null;
     if (usePw && !pw) { toast(t('exp.needPassword'), true); return; }
-
-    $('btnExport').disabled = true;
-    $('expLinks').innerHTML = '';
+    const mergeRequested = $('expMerge').checked;
+    const channel = state.channel;
+    const manual = state.manualRecording;
+    const clipChannel = manual ? t('video.manualSource') : multiChannel() ? channelName(channel) : null;
+    const name = ($('expName').value.trim() || 'export').replace(/[^\w.-]+/g, '_');
+    const base = manual ? `${name}_recording` : clipChannel ? `${name}_ch${channel}` : name;
+    const request = new AbortController();
+    const { signal } = request;
+    exportAbort = request;
+    $('btnExport').disabled = $('btnQuickClip').disabled = $('btnClearSel').disabled = true;
+    $('btnCancelExport').classList.remove('hidden');
+    $('expInfo').textContent = t('exp.checking');
     try {
-      const recs = (await listRecordings(a, b))
-        .filter((r) => r.start < b && recStop(r) > a)
-        .sort((x, y) => (x.type === 'continuous' ? -1 : 1) - (y.type === 'continuous' ? -1 : 1) || x.start - y.start);
-
-      // Non-overlapping segments: each recording only contributes what is not covered yet.
-      const chosen = [];
-      for (const r of recs) {
-        let segs = [{ s: Math.max(a, r.start), e: Math.min(b, recStop(r)) }];
-        for (const c of chosen) {
-          segs = segs.flatMap((g) => {
-            if (c.e <= g.s || c.s >= g.e) return [g];
-            const out = [];
-            if (c.s > g.s) out.push({ s: g.s, e: c.s });
-            if (c.e < g.e) out.push({ s: c.e, e: g.e });
-            return out;
-          });
-        }
-        segs.filter((g) => g.e - g.s >= 1000).forEach((g) => chosen.push({ r, s: g.s, e: g.e }));
-      }
-      chosen.sort((x, y) => x.s - y.s);
-
-      if (!chosen.length) { $('expInfo').textContent = t('exp.none'); return; }
-
-      let base = ($('expName').value.trim() || 'export').replace(/[^\w.-]+/g, '_');
-      if (multiChannel()) base += `_ch${state.channel}`;
-      const merge = $('expMerge').checked && chosen.length > 1;
+      const { recs, unknown, complete } = manual ? { recs: [manual], unknown: [], complete: true } : await listRecordings(a, b, { channel, signal });
+      signal.throwIfAborted();
+      if (!complete) throw new Error(t('err.incomplete'));
+      const overlaps = (r) => r.start < b && recStop(r) > a;
+      if (unknown.some(overlaps)) throw new Error(t('err.source'));
+      const chosen = planExport(recs.filter(overlaps), a, b);
+      if (!chosen.length) { $('expInfo').textContent = t(manual ? 'exp.manualOutside' : 'exp.none'); return; }
+      if (chosen.some(({ r }) => !r.disk)) throw new Error(t('err.xml'));
+      const merge = mergeRequested && !usePw && chosen.length > 1;
+      const gaps = b - a - chosen.reduce((ms, c) => ms + c.e - c.s, 0);
+      const details = [
+        t('exp.review', { from: `${fmtDateTime(a)} ${fmtOffset(a)}`, to: `${fmtDateTime(b)} ${fmtOffset(b)}`, parts: chosen.length }),
+        clipChannel,
+        manual ? t('exp.manualOnly') : null,
+        gaps > 0 ? t(manual ? 'exp.manualGap' : 'exp.gaps', { d: gaps < 1000 ? '< 1 s' : fmtDuration(gaps) }) : t('exp.noGaps'),
+        b - a > 6 * HOUR ? t('exp.large', { d: fmtDuration(b - a) }) : null,
+        merge ? t('exp.mergeReview') : t('exp.files', { n: chosen.length }),
+        t('exp.keyframe'),
+      ].filter(Boolean).join('\n');
+      if (!confirm(details)) { $('expInfo').textContent = t('exp.aborted'); return; }
+      $('expLinks').innerHTML = '';
 
       if (!merge) {
-        exportSeparate(chosen, base, usePw ? pw : null);
+        exportSeparate(chosen, base, pw);
         $('expInfo').textContent = chosen.length > 1 ? t('exp.parts', { n: chosen.length }) : t('exp.started');
         return;
       }
-      if (usePw) {
-        exportSeparate(chosen, base, pw);
-        $('expInfo').textContent = t('exp.pwNoMerge', { n: chosen.length });
-        return;
-      }
       try {
-        await exportMerged(chosen, base, a);
+        await exportMerged(chosen, base, signal, clipChannel);
       } catch (e) {
-        if (e.name === 'AbortError') { $('expInfo').textContent = t('exp.aborted'); return; }
         if (e instanceof window.MkvConcat.MkvConcatIncompatibleError) {
+          request.abort(); // also release the current part's streaming response
           exportSeparate(chosen, base, null);
           $('expInfo').textContent = t('exp.incompatible', { n: chosen.length });
           return;
@@ -776,10 +1090,12 @@
         throw e;
       }
     } catch (e) {
-      toast(t('exp.failed', { msg: e.message }), true);
-      $('expInfo').textContent = '';
+      $('expInfo').textContent = signal.aborted ? t('exp.aborted') : t('exp.failed', { msg: e.message });
     } finally {
-      $('btnExport').disabled = false;
+      request.abort();
+      exportAbort = null;
+      $('btnCancelExport').classList.add('hidden');
+      $('btnExport').disabled = $('btnQuickClip').disabled = $('btnClearSel').disabled = false;
     }
   }
 
@@ -800,81 +1116,141 @@
   }
 
   async function loadStorage() {
+    const sel = $('recDisk');
+    const prev = sel.value;
     try {
       const doc = await fetchXml('/axis-cgi/disks/list.cgi?diskid=all');
-      state.disks = Array.from(doc.getElementsByTagName('disk')).map((d) => ({
+      state.disks = Array.from(xmlElement(doc, 'disks').getElementsByTagName('disk'), (d) => ({
         id: d.getAttribute('diskid'),
-        status: d.getAttribute('status') || '',
+        name: d.getAttribute('name'),
+        status: (d.getAttribute('status') || '').toLowerCase(),
         total: Number(d.getAttribute('totalsize')),   // kB
         free: Number(d.getAttribute('freesize')),     // kB
-      }));
+        locked: /^(yes|true)$/i.test(d.getAttribute('locked') || ''),
+        readOnly: /^(yes|true)$/i.test(d.getAttribute('readonly') || ''),
+        full: /^(yes|true)$/i.test(d.getAttribute('full') || ''),
+        cleanup: d.getAttribute('cleanuppolicy'),
+      })).filter((d) => d.id);
+      state.storageState = 'ready';
       const gb = (kb) => (kb / 1024 / 1024).toFixed(1);
       const parts = state.disks
-        .filter((d) => d.status && d.status.toLowerCase() !== 'disconnected')
-        .map((d) => `${d.id}: ${d.status}${d.total > 0 ? ' – ' + t('storage.used', { used: gb(d.total - d.free), total: gb(d.total) }) : ''}`);
+        .filter((d) => d.status && d.status !== 'disconnected')
+        .map((d) => {
+          const status = d.status !== 'ok' ? d.status : t(writableDisk(d) ? 'storage.ready' : 'storage.notWritable');
+          return `${diskName(d.id)}: ${status}${d.total > 0 ? ' · ' + t('storage.used', { used: gb(d.total - d.free), total: gb(d.total) }) : ''}`;
+        });
       $('storageStatus').textContent = parts.length ? `${t('storage.label')}: ${parts.join(' | ')}` : t('storage.none');
-      const sel = $('recDisk');
-      const prev = sel.value;
-      sel.innerHTML = '';
-      state.disks.filter((d) => d.status.toLowerCase() === 'ok').forEach((d) => {
-        const o = document.createElement('option');
-        o.value = d.id; o.textContent = d.id;
-        sel.appendChild(o);
-      });
-      if (prev) sel.value = prev;
     } catch (e) {
-      $('storageStatus').textContent = t('storage.unavailable');
+      state.disks = null;
+      state.storageState = e.status === 401 || e.status === 403 ? 'forbidden' : 'unknown';
+      $('storageStatus').textContent = t(state.storageState === 'forbidden' ? 'storage.forbidden' : 'storage.unavailable');
     }
+    sel.replaceChildren();
+    const targets = (state.disks || []).filter(writableDisk);
+    for (const d of targets) {
+      const o = document.createElement('option');
+      o.value = d.id;
+      o.textContent = diskName(d.id);
+      sel.appendChild(o);
+    }
+    const preferred = targets.find((d) => d.id === prev) || targets.find((d) => d.id === 'SD_DISK') || targets[0];
+    if (preferred) sel.value = preferred.id;
+    renderRecordingConfig();
   }
 
   // Continuous recording configurations (classic edge storage API)
-  let recConfigs = null;     // null = unknown/unavailable
+  const writableDisk = (d) => d.status === 'ok' && !d.locked && !d.readOnly && (!d.full || d.cleanup === 'fifo');
+  const diskName = (id) => id === 'SD_DISK' ? t('storage.sd') : (state.disks?.find((d) => d.id === id)?.name || id);
+  let recConfigs;
+  let configSeq = 0;
+  let activeRecording;
+  let activeRequest;
+  let enablingRecording = false;
+  let setupDenied = false;
 
   /** Channel a config records: "camera=N" in its options, otherwise channel 1. */
   function configChannel(cfg) {
-    const m = decodeURIComponent(cfg.options || '').match(/(?:^|&)camera=(\d+)/);
-    return m ? Number(m[1]) : 1;
+    let options = cfg.options;
+    try { if (!options.includes('=')) options = decodeURIComponent(options); } catch (e) { return null; }
+    const camera = new URLSearchParams(options).get('camera');
+    return camera == null ? 1 : /^\d+$/.test(camera) ? Number(camera) : null;
   }
 
   async function loadRecordingConfig() {
+    const seq = ++configSeq;
     try {
       const doc = await fetchXml('/axis-cgi/record/continuous/listconfiguration.cgi');
-      recConfigs = Array.from(doc.getElementsByTagName('continuousrecordingconfiguration')).map((c) => ({
+      if (seq !== configSeq) return;
+      recConfigs = Array.from(xmlElement(doc, 'continuousrecordingconfigurations').getElementsByTagName('continuousrecordingconfiguration'), (c) => ({
         profile: c.getAttribute('profile'),
         disk: c.getAttribute('diskid'),
         options: c.getAttribute('options') || '',
       }));
     } catch (e) {
+      if (seq !== configSeq) return;
       recConfigs = null;
     }
     renderRecordingConfig();
   }
 
+  async function refreshActiveRecording() {
+    activeRequest?.abort();
+    const request = new AbortController();
+    activeRequest = request;
+    const channel = state.channel;
+    if (activeRecording?.channel !== channel) activeRecording = undefined;
+    renderRecordingConfig();
+    try {
+      const now = Date.now();
+      const result = await listRecordings(now - 5 * MIN, now, { channel, signal: request.signal });
+      if (request.signal.aborted) return;
+      const ongoing = (r) => r.status === 'recording' && (!r.stop || r.stop > now - MIN);
+      activeRecording = { channel, ongoing: result.recs.filter(ongoing), unknown: result.unknown.some(ongoing) };
+    } catch (e) {
+      if (request.signal.aborted) return;
+      activeRecording = { channel, ongoing: [], unknown: true };
+    }
+    renderRecordingConfig();
+  }
+
   function renderRecordingConfig() {
-    const el = $('recStatus');
-    if (recConfigs == null) {
-      el.textContent = t('rec.unavailable');
-      $('recEnableRow').classList.add('hidden');
-      return;
-    }
-    const mine = recConfigs.filter((c) => configChannel(c) === state.channel);
-    if (mine.length) {
-      const disks = [...new Set(mine.map((c) => c.disk))].map(escapeHtml).join(', ');
-      el.innerHTML = `<span class="dot on"></span>${t('rec.on', { disks })}`;
-    } else {
-      el.innerHTML = `<span class="dot off"></span>${escapeHtml(multiChannel() ? t('rec.offChannel') : t('rec.off'))}`;
-    }
-    if (multiChannel() && recConfigs.length) {
-      const chans = [...new Set(recConfigs.map(configChannel))].sort((x, y) => x - y).map((c) => channelName(c));
-      el.innerHTML += `<div class="muted small">${escapeHtml(t('rec.onOthers', { list: chans.join(', ') }))}</div>`;
-    }
-    // Only offer when this channel has none yet (otherwise duplicate recording)
-    $('recEnableRow').classList.toggle('hidden', mine.length > 0 || !$('recDisk').options.length);
+    const mine = recConfigs?.filter((c) => configChannel(c) === state.channel) || [];
+    const ongoing = activeRecording?.channel === state.channel ? activeRecording.ongoing : [];
+    const activeDisks = [...new Set(ongoing.map((r) => r.disk).filter(Boolean))].map(diskName).join(', ');
+    const connected = state.disks?.filter((d) => d.status !== 'disconnected');
+    const writable = connected?.some(writableDisk);
+    const sd = connected?.find((d) => d.id === 'SD_DISK');
+    const active = ongoing.length > 0;
+    const indicator = $('recordingIndicator');
+    const key = active ? (activeDisks ? 'rec.activeDisk' : 'rec.active')
+      : sd && !writableDisk(sd) ? 'rec.sdNotWritable'
+      : !activeRecording ? 'rec.loading'
+      : mine.length ? 'rec.configured'
+      : activeRecording.unknown ? 'rec.statusUnknown' : 'rec.notRunning';
+    const message = t(key, { disks: activeDisks });
+    const setup = enablingRecording ? 'rec.saving'
+      : setupDenied || state.storageState === 'forbidden' ? 'rec.needsRights'
+      : state.storageState === 'unknown' ? 'rec.noStorageAccess'
+      : connected && connected.length === 0 ? 'rec.setupDisk'
+      : connected && !writable ? 'rec.unwritable'
+      : recConfigs === null ? 'rec.unavailable'
+      : recConfigs === undefined || !activeRecording ? 'rec.loading'
+      : mine.length || active || activeRecording.unknown ? key : 'rec.off';
+    indicator.classList.toggle('active', active);
+    if (indicator.textContent !== message) indicator.textContent = message;
+    $('recStatus').textContent = t(setup, { disks: activeDisks });
+    const canEnable = Boolean(writable && recConfigs && !mine.length && !active && activeRecording && !activeRecording.unknown && !setupDenied);
+    $('recEnableRow').classList.toggle('hidden', !canEnable && !enablingRecording);
+    $('btnEnableRec').disabled = $('recDisk').disabled = enablingRecording;
   }
 
   async function enableContinuous() {
+    if (enablingRecording || setupDenied || !recConfigs || recConfigs.some((c) => configChannel(c) === state.channel)) return;
+    if (!activeRecording || activeRecording.channel !== state.channel || activeRecording.unknown || activeRecording.ongoing.length) return;
     const disk = $('recDisk').value;
-    if (!disk) { toast(t('rec.noDisk'), true); return; }
+    if (!state.disks?.some((d) => d.id === disk && writableDisk(d))) { toast(t('rec.noDisk'), true); return; }
+    enablingRecording = true;
+    renderRecordingConfig();
     try {
       const opts = multiChannel() ? `camera=${state.channel}&videocodec=h264` : 'videocodec=h264';
       const p = new URLSearchParams({ diskid: disk, options: opts });
@@ -883,10 +1259,15 @@
       if (c && c.getAttribute('result') === 'OK') toast(t('rec.enabled', { profile: c.getAttribute('profile') }));
       else toast(t('rec.error', { msg: c ? c.getAttribute('errormsg') : t('rec.unknownResponse') }), true);
     } catch (e) {
+      if (e.status === 401 || e.status === 403) setupDenied = true;
       toast(t('rec.enableFailed', { msg: e.message }), true);
+    } finally {
+      await loadRecordingConfig();
+      enablingRecording = false;
+      renderRecordingConfig();
+      refreshActiveRecording();
+      setTimeout(() => { refreshRecordings(true); refreshActiveRecording(); }, 3000);
     }
-    loadRecordingConfig();
-    setTimeout(refreshRecordings, 3000);
   }
 
   // ------------------------------------------------------------ Wiring
@@ -897,19 +1278,21 @@
     if (now < state.viewStart || now > state.viewEnd) showDay(startOfDay(now));
   });
   $('btnPause').addEventListener('click', togglePause);
-  $('btnBack').addEventListener('click', () => playAt(currentWall() - SKIP));
-  $('btnFwd').addEventListener('click', () => playAt(currentWall() + SKIP));
+  $('btnBack').addEventListener('click', () => playAt((state.pendingSeek ?? currentWall()) - SKIP, { reuseManual: true }));
+  $('btnFwd').addEventListener('click', () => playAt((state.pendingSeek ?? currentWall()) + SKIP, { reuseManual: true }));
+  $('btnRetryPlayback').addEventListener('click', () => playAt(currentWall(), { reuseManual: true }));
   $('btnSnapshot').addEventListener('click', () => {
+    if (state.mode !== 'live' || state.pendingSeek != null || state.streamStatus !== 'playing') return;
     const p = new URLSearchParams({ camera: String(state.channel) });
     const res = $('resolution').value;
     if (res) p.set('resolution', res);
     const suffix = multiChannel() ? `_ch${state.channel}` : '';
     download(`/axis-cgi/jpg/image.cgi?${p}`, `snapshot${suffix}_${fmtStamp(Date.now())}.jpg`);
   });
-  $('resolution').addEventListener('change', () => { if (state.mode === 'live') goLive(); });
+  $('resolution').addEventListener('change', () => { if (state.mode === 'live' && state.pendingSeek == null) goLive(); });
   $('streamProfile').addEventListener('change', () => {
     store.set('streamprofile', $('streamProfile').value);
-    if (state.mode === 'live') goLive();
+    if (state.mode === 'live' && state.pendingSeek == null) goLive();
   });
   $('channel').addEventListener('change', (ev) => setChannel(Number(ev.target.value)));
 
@@ -918,25 +1301,43 @@
     const [y, m, d] = ev.target.value.split('-').map(Number);
     showDay(new Date(y, m - 1, d).getTime());
   });
-  $('btnPrevDay').addEventListener('click', () => setView(state.viewStart - DAY, state.viewEnd - DAY));
-  $('btnNextDay').addEventListener('click', () => setView(state.viewStart + DAY, state.viewEnd + DAY));
+  $('btnPrevDay').addEventListener('click', () => stepDay(-1));
+  $('btnNextDay').addEventListener('click', () => stepDay(1));
   $('btnToday').addEventListener('click', () => showDay(startOfDay(Date.now())));
   $('btnZoomIn').addEventListener('click', () => zoom(0.5, state.mode === 'live' ? null : currentWall()));
   $('btnZoomOut').addEventListener('click', () => zoom(2));
   $('btnFitDay').addEventListener('click', () => showDay(startOfDay((state.viewStart + state.viewEnd) / 2)));
+  $('jumpForm').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const time = fromLocalInput($('jumpTime').value);
+    if (!Number.isFinite(time) || time > Date.now()) { toast(t('tl.invalidTime'), true); return; }
+    if (time < state.viewStart || time >= state.viewEnd) showDay(startOfDay(time));
+    playAt(time);
+  });
   $('btnSelectMode').addEventListener('click', () => {
     state.selectMode = !state.selectMode;
     $('btnSelectMode').classList.toggle('active', state.selectMode);
+    $('btnSelectMode').setAttribute('aria-pressed', String(state.selectMode));
     canvas.classList.toggle('selecting', state.selectMode);
   });
 
   $('expStart').addEventListener('change', selectionFromInputs);
   $('expEnd').addEventListener('change', selectionFromInputs);
-  $('expPwEnable').addEventListener('change', (ev) => $('expPw').classList.toggle('hidden', !ev.target.checked));
-  $('btnExport').addEventListener('click', doExport);
+  $('expPwEnable').addEventListener('change', (ev) => $('expPwRow').classList.toggle('hidden', !ev.target.checked));
+  $('btnExport').addEventListener('click', () => doExport(...selectedExportRange()));
+  $('btnQuickClip').addEventListener('click', () => {
+    if (exportAbort) return;
+    const end = Math.floor((state.pendingSeek ?? currentWall()) / 1000) * 1000;
+    state.selStart = end - SKIP;
+    state.selEnd = end;
+    syncSelectionInputs();
+    draw();
+    doExport(state.selStart, state.selEnd);
+  });
   $('btnCancelExport').addEventListener('click', () => { if (exportAbort) exportAbort.abort(); });
   $('btnClearSel').addEventListener('click', () => {
     state.selStart = state.selEnd = null;
+    dragExportRange = null;
     $('expStart').value = $('expEnd').value = '';
     $('expInfo').textContent = '';
     $('expLinks').innerHTML = '';
@@ -955,31 +1356,33 @@
     const time = currentWall();
     $('clock').textContent = fmtDateTime(time);
     // continue past the end of a completed recording
-    if (state.mode === 'playback' && state.rec && state.rec.stop != null && time > state.rec.stop + 2000) {
+    if (state.mode === 'playback' && state.streamStatus === 'playing' && state.rec?.stop != null && time > state.rec.stop + 2000) {
       onRecordingEnded();
     }
     if (!drag) draw();
   }, 250);
 
-  setInterval(refreshRecordings, 30 * 1000);   // running recordings grow
-  setInterval(loadStorage, 60 * 1000);
-
   // Interface for add-on modules (ptz.js)
-  window.MicroVms = { toast, mode: () => state.mode, channel: () => state.channel };
+  window.MicroVms = { toast, mode: () => announcedMode, channel: () => state.channel };
 
   // ------------------------------------------------------------ Start
 
   (async () => {
-    if (!MSL || !MSL.Html5VideoPipeline) videoMsg(t('video.libMissing'));
     const now = Date.now();
     setView(now - 2 * HOUR, now + 30 * MIN, { fetch: false });
+    $('jumpTime').value = toLocalInput(now - MIN);
     resizeCanvas();
     updateModeUi();
     loadDeviceInfo();
+    loadStorage();
+    loadRecordingConfig();
     await Promise.all([loadChannels(), loadStreamProfiles()]);
     document.dispatchEvent(new CustomEvent('microvms:channel', { detail: { channel: state.channel, previous: null } }));
+    if (!playbackIntent) goLive();
+    await loadRecordingSources();
     refreshRecordings();
-    loadStorage().then(loadRecordingConfig);
-    if (MSL && MSL.Html5VideoPipeline) goLive();
+    refreshActiveRecording();
+    setInterval(() => { loadRecordingSources().then(() => refreshRecordings(true)); refreshActiveRecording(); }, 30 * 1000);
+    setInterval(() => { loadStorage(); loadRecordingConfig(); }, 60 * 1000);
   })();
 })();

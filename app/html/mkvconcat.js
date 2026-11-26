@@ -96,7 +96,7 @@
       if (!(await this.fill(1))) return null;
       const len = vintLen(this.peekBytes(1)[0]);
       if (len > 4) throw new Error('Invalid EBML ID');
-      if (!(await this.fill(len))) return null;
+      if (!(await this.fill(len))) throw new Error('Unexpected end of file');
       const b = this.peekBytes(len);
       let id = 0;
       for (let i = 0; i < len; i++) id = id * 256 + b[i];
@@ -275,6 +275,7 @@
       let maxAbs = null;      // größte Blockzeit (absolut, Quelle)
       let lastV = null; let minDelta = Infinity;  // für die Framedauer
       let partTracks = null;
+      let partHasVideo = false;
 
       // Top-Level
       while (!(await r.eof())) {
@@ -315,7 +316,7 @@
                 if (!p || LEVEL1.has(p.id)) break;
               }
               const ch = await r.readHeader();
-              if (!ch) break;
+              if (!ch) throw new Error('Unexpected end of cluster');
               if (ch.id === ID.Timecode) {
                 const b = await r.read(ch.size); tc = readUint(b, 0, b.length);
               } else if (ch.id === ID.SimpleBlock || ch.id === ID.BlockGroup) {
@@ -331,6 +332,7 @@
                 await r.skip(ch.size);   // Position, PrevSize, Void, CRC ...
               }
             }
+            if (c.size >= 0 && r.pos !== end) throw new Error('Invalid cluster size');
             if (!blocks.length) continue;
             if (partBase == null) partBase = tc;
             const newTc = tc - partBase + offset;
@@ -343,6 +345,7 @@
               const abs = tc + b.info.rel;
               if (maxAbs == null || abs > maxAbs) maxAbs = abs;
               if (b.info.track === videoTrack) {
+                partHasVideo = true;
                 if (cueTime == null && b.info.key) cueTime = newTc + b.info.rel;
                 if (lastV != null && abs !== lastV) minDelta = Math.min(minDelta, Math.abs(abs - lastV));
                 lastV = abs;
@@ -358,12 +361,12 @@
         }
       }
 
-      if (partBase != null && maxAbs != null) {
-        // nächster Teil schließt nahtlos an: letzte Blockzeit + eine Framedauer
-        let frame = minDelta;
-        if (!(frame > 0 && frame < 1000)) frame = Math.round(40 * 1e6 / (timecodeScale || 1e6));
-        offset = maxAbs - partBase + offset + frame;
-      }
+      if (partBase == null || maxAbs == null || !partHasVideo) throw new Error(`No video data in part ${partIdx + 1}`);
+      r.reader.releaseLock();
+      // nächster Teil schließt nahtlos an: letzte Blockzeit + eine Framedauer
+      let frame = minDelta;
+      if (!(frame > 0 && frame < 1000)) frame = Math.round(40 * 1e6 / (timecodeScale || 1e6));
+      offset = maxAbs - partBase + offset + frame;
     }
 
     if (!tracksBytes) throw new Error('No video data found in export');
