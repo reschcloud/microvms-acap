@@ -1,0 +1,53 @@
+name: Release
+
+# Ein Tag vX.Y.Z (passend zur Version in app/manifest.json) baut das .eap
+# und legt den GitHub-Release mit angehängtem Paket an.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Vorhandenes Tag, für das ein Release erzeugt wird (z. B. v0.2.3)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Version prüfen
+        run: |
+          version=$(sed -n 's/.*"version": "\([0-9.]*\)".*/\1/p' app/manifest.json | head -1)
+          if [ "v$version" != "$TAG" ]; then
+            echo "Tag $TAG passt nicht zur Version $version in app/manifest.json" >&2
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test tests/app.test.cjs
+
+      # build.sh nutzt Docker; der Runner hat das ACAP Native SDK nicht lokal,
+      # das Image wird beim ersten Lauf einmalig gezogen.
+      - name: Paket bauen
+        run: ./build.sh
+
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" build/*.eap \
+            --title "Micro VMS ACAP $TAG" \
+            --generate-notes \
+            --verify-tag

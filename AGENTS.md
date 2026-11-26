@@ -2,8 +2,9 @@
 
 ## Build and verify
 
+- Releases are automated: `./release.sh <version>` bumps `app/manifest.json`, commits, tags and pushes; `.github/workflows/release.yml` then builds and publishes the `.eap` (and fails if tag and manifest version differ). `tests.yml` runs the Node tests on every push/PR. Pushing `build/` artifacts is not needed.
 - Run `./build.sh` with Docker. It uses Axis ACAP Native SDK 12.11.0 and replaces the entire ignored `build/` directory with the packaged app tree. Edit `app/`, not `build/`. The aarch64 SDK image still produces one architecture-`all` package: `build/Micro_VMS_0_2_3_all.eap` for manifest version `0.2.3`.
-- Run `node --test tests/app.test.cjs` with Node 22 (no npm install) for mocked VAPIX/playback tests; for shell changes use `sh -n build.sh` and `sh -n app/microvms`. Dependabot tracks the Docker SDK image only, not the vendored JavaScript.
+- Run `node --test tests/app.test.cjs` with Node 22 (no npm install) for mocked VAPIX/playback tests; for shell changes use `sh -n build.sh && sh -n app/microvms && sh -n release.sh`. Dependabot tracks the Docker SDK image only, not the vendored JavaScript.
 - For an end-to-end smoke test, install the `.eap` in Axis Apps, start it, and open `/local/microvms/index.html` on the camera. The UI uses the camera's existing login and same-origin VAPIX/RTSP-over-WebSocket endpoints. A static preview needs mocked API responses; it does not verify streaming or export. Playback/export checks need a camera with recordings on configured SD/NAS storage.
 
 ## Runtime wiring

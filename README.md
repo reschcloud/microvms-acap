@@ -45,9 +45,23 @@ Voraussetzung: Docker.
 ./build.sh
 ```
 
-Ergebnis für Paketversion `0.2.3`: `build/Micro_VMS_0_2_3_all.eap` – ein Paket für **armv7hf und aarch64** (reine Web-/Shell-App, kein Kompilieren nötig).
+Ergebnis: `build/Micro_VMS_<version>_all.eap` – ein Paket für **armv7hf und aarch64** (reine Web-/Shell-App, kein Kompilieren nötig).
 
 Gemockte Tests ohne npm-Abhängigkeiten: `node --test tests/app.test.cjs` (Node 22).
+
+## Release
+
+Ein gepushtes Tag `v<version>` baut das Paket in GitHub Actions und legt den
+Release mit angehängtem `.eap` an (`.github/workflows/release.yml`). Der
+Workflow bricht ab, wenn Tag und `version` in `app/manifest.json` nicht
+übereinstimmen:
+
+```sh
+./release.sh 0.2.4     # Version setzen, committen, taggen, pushen
+```
+
+Für ein bereits vorhandenes Tag ohne Release: Actions → **Release** →
+**Run workflow** mit dem Tag als Eingabe.
 
 ## Installieren
 
