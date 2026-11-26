@@ -23,6 +23,6 @@ sed -i "s/^\( *\)\"version\": \"[0-9.]*\"/\1\"version\": \"$VERSION\"/" app/mani
 [ "$(sed -n 's/.*"version": "\([0-9.]*\)".*/\1/p' app/manifest.json | head -1)" = "$VERSION" ] \
   || { echo "Version in app/manifest.json konnte nicht gesetzt werden." >&2; exit 1; }
 
-git commit -qam "Release Micro VMS $VERSION" -- app/manifest.json
+git commit -q -m "Release Micro VMS $VERSION" -- app/manifest.json
 git tag -a "$TAG" -m "Micro VMS ACAP $TAG"
 git push origin HEAD "$TAG"
