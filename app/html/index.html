@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Micro VMS</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="i18n.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◉</span>
+      <span data-i18n="app.title">Micro VMS</span>
+      <span id="deviceName" class="muted"></span>
+    </div>
+    <div class="topbar-right">
+      <div id="storageStatus" class="storage muted"></div>
+      <div class="lang-switch" data-i18n-title="lang.switch">
+        <button data-lang="de">DE</button><button data-lang="en">EN</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="viewer">
+      <div class="video-wrap">
+        <video id="video" muted autoplay playsinline></video>
+        <div id="modeBadge" class="badge live" data-i18n="badge.live">LIVE</div>
+        <div id="clock" class="clock">–</div>
+        <div id="videoMsg" class="video-msg hidden"></div>
+      </div>
+
+      <div class="controls">
+        <button id="btnLive" class="live-btn is-live" data-i18n="live.btn" data-i18n-title="live.btn.title" disabled>Live</button>
+        <span class="sep"></span>
+        <button id="btnBack" data-i18n-title="ctl.back.title">⏪ 30s</button>
+        <button id="btnPause" data-i18n-title="ctl.pause.title">⏸</button>
+        <button id="btnFwd" data-i18n-title="ctl.fwd.title">30s ⏩</button>
+        <span class="sep"></span>
+        <label id="channelWrap" class="inline hidden"><span data-i18n="ctl.channel">Kanal</span>
+          <select id="channel"></select>
+        </label>
+        <label id="streamWrap" class="inline hidden"><span data-i18n="ctl.stream">Stream</span>
+          <select id="streamProfile"><option value="" data-i18n="ctl.stream.auto"></option></select>
+        </label>
+        <label class="inline"><span data-i18n="ctl.resolution">Auflösung</span>
+          <select id="resolution">
+            <option value="" data-i18n="ctl.resolution.default"></option>
+            <option value="1920x1080">1920×1080</option>
+            <option value="1280x720">1280×720</option>
+            <option value="640x360">640×360</option>
+          </select>
+        </label>
+        <button id="btnSnapshot" data-i18n="ctl.snapshot" data-i18n-title="ctl.snapshot.title"></button>
+      </div>
+    </section>
+
+    <section class="timeline-panel">
+      <div class="tl-toolbar">
+        <button id="btnPrevDay" data-i18n-title="tl.prevDay">◀</button>
+        <input type="date" id="dayPicker">
+        <button id="btnNextDay" data-i18n-title="tl.nextDay">▶</button>
+        <button id="btnToday" data-i18n="tl.today"></button>
+        <span class="sep"></span>
+        <button id="btnZoomOut" data-i18n-title="tl.zoomOut">−</button>
+        <button id="btnZoomIn" data-i18n-title="tl.zoomIn">+</button>
+        <button id="btnFitDay" data-i18n-title="tl.fitDay">24h</button>
+        <span class="sep"></span>
+        <button id="btnSelectMode" class="toggle" data-i18n="tl.select" data-i18n-title="tl.select.title"></button>
+        <span class="legend">
+          <i class="lg continuous"></i><span data-i18n="tl.legend.continuous"></span>
+          <i class="lg triggered"></i><span data-i18n="tl.legend.triggered"></span>
+          <i class="lg scheduled"></i><span data-i18n="tl.legend.scheduled"></span>
+        </span>
+      </div>
+      <div class="tl-canvas-wrap">
+        <canvas id="timeline"></canvas>
+        <div id="tlTooltip" class="tl-tooltip hidden"></div>
+      </div>
+      <div class="hint muted" data-i18n="tl.hint"></div>
+    </section>
+
+    <section class="side">
+      <div class="card">
+        <h3 data-i18n="exp.title"></h3>
+        <label><span data-i18n="exp.from"></span> <input type="datetime-local" id="expStart" step="1"></label>
+        <label><span data-i18n="exp.to"></span> <input type="datetime-local" id="expEnd" step="1"></label>
+        <label><span data-i18n="exp.name"></span> <input type="text" id="expName" placeholder="export"></label>
+        <label class="inline"><input type="checkbox" id="expMerge" checked> <span data-i18n="exp.merge"></span></label>
+        <label class="inline"><input type="checkbox" id="expPwEnable"> <span data-i18n="exp.password"></span></label>
+        <input type="password" id="expPw" data-i18n-placeholder="exp.password.placeholder" class="hidden" autocomplete="new-password">
+        <div class="row">
+          <button id="btnExport" class="primary" data-i18n="exp.start"></button>
+          <button id="btnCancelExport" class="hidden" data-i18n="exp.cancel"></button>
+          <button id="btnClearSel" data-i18n="exp.clear"></button>
+        </div>
+        <div id="expInfo" class="muted small"></div>
+        <ul id="expLinks" class="links"></ul>
+      </div>
+
+      <div id="ptzCard" class="card hidden">
+        <h3 data-i18n="ptz.title"></h3>
+        <div id="ptzHint" class="muted small"></div>
+        <div class="ptz-main">
+          <div id="ptzPad" class="ptz-pad">
+            <button data-dir="-1,1" data-i18n-title="ptz.dir.ul">↖</button>
+            <button data-dir="0,1" data-i18n-title="ptz.dir.u">▲</button>
+            <button data-dir="1,1" data-i18n-title="ptz.dir.ur">↗</button>
+            <button data-dir="-1,0" data-i18n-title="ptz.dir.l">◀</button>
+            <button id="ptzHome" data-i18n-title="ptz.home">⌂</button>
+            <button data-dir="1,0" data-i18n-title="ptz.dir.r">▶</button>
+            <button data-dir="-1,-1" data-i18n-title="ptz.dir.dl">↙</button>
+            <button data-dir="0,-1" data-i18n-title="ptz.dir.d">▼</button>
+            <button data-dir="1,-1" data-i18n-title="ptz.dir.dr">↘</button>
+          </div>
+          <div id="ptzZoomRow" class="ptz-zoom">
+            <button id="ptzZoomIn" data-i18n-title="ptz.zoomIn">＋</button>
+            <span class="muted small" data-i18n="ptz.zoom"></span>
+            <button id="ptzZoomOut" data-i18n-title="ptz.zoomOut">－</button>
+          </div>
+        </div>
+        <label><span><span data-i18n="ptz.speed"></span> <span id="ptzSpeedVal"></span></span>
+          <input type="range" id="ptzSpeed" min="5" max="100" step="5" value="50">
+        </label>
+        <div id="ptzPresetRow" class="row">
+          <select id="ptzPreset" class="grow"></select>
+          <button id="ptzGoPreset" data-i18n="ptz.goto"></button>
+          <button id="ptzReloadPresets" data-i18n-title="ptz.reload">↻</button>
+        </div>
+        <label id="ptzCenterRow" class="inline"><input type="checkbox" id="ptzClickCenter" checked> <span data-i18n="ptz.clickCenter"></span></label>
+        <div class="muted small" data-i18n="ptz.keyboard"></div>
+      </div>
+
+      <div class="card">
+        <h3 data-i18n="rec.title"></h3>
+        <div id="recStatus" class="small" data-i18n="rec.loading"></div>
+        <div id="recEnableRow" class="row hidden">
+          <select id="recDisk" data-i18n-title="rec.disk.title"></select>
+          <button id="btnEnableRec" data-i18n="rec.enable"></button>
+        </div>
+        <div class="muted small" data-i18n-html="rec.hint"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>I18N.apply();</script>
+  <script src="vendor/media-stream-library.min.js"></script>
+  <script src="mkvconcat.js"></script>
+  <script src="app.js"></script>
+  <script src="ptz.js"></script>
+</body>
+</html>

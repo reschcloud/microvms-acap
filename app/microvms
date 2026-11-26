@@ -1,0 +1,8 @@
+#!/bin/sh
+# Micro VMS – die eigentliche Logik läuft komplett im Browser (html/).
+# Dieser Prozess hält die App nur im Status "Running", damit die
+# Kamera-Oberfläche den "Öffnen"-Button anzeigt. Kein CPU-Verbrauch.
+logger -t "microvms[$$]" -p INFO "Micro VMS gestartet, UI unter /local/microvms/index.html"
+while true; do
+    sleep 3600
+done

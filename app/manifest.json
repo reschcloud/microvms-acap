@@ -1,0 +1,22 @@
+{
+    "schemaVersion": "2.2.0",
+    "acapPackageConf": {
+        "setup": {
+            "appName": "microvms",
+            "friendlyName": "Micro VMS",
+            "vendor": "Custom",
+            "vendorId": "1234567890",
+            "version": "0.1.0",
+            "compatibleOsVersions": [
+                {
+                    "max": "13"
+                }
+            ],
+            "runMode": "respawn",
+            "architecture": "all"
+        },
+        "configuration": {
+            "settingPage": "index.html"
+        }
+    }
+}
