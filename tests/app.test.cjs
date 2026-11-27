@@ -10,7 +10,7 @@ const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').repla
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
     refreshActiveRecording, doExport, loadChannels,
-    refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked,
+    refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
     formatBitrate, totalBitrate, updateBandwidth, updatePing, resolveShortcut, setTheater, footageAt };
@@ -478,13 +478,22 @@ test('the continuous recording controls are gone', async () => {
   assert.equal(html.includes('Daueraufzeichnung'), false);
 });
 
+test('an ongoing recording remains open when it has no stop time', async () => {
+  const app = await browser();
+  const now = Date.now();
+  const rows = app.parseRecordings(xml('recordings', {}, [recording('live', now - 3600000, null, { recordingstatus: 'recording' })]));
+  assert.equal(rows[0].status, 'recording');
+  assert.ok(app.recStop(rows[0]) >= now);
+});
+
 test('pausing keeps the frame and does not claim no recording when footage exists', async () => {
   const app = await browser();
-  app.route(() => recordings(1, recording('live', Date.now() - 60000, null, { recordingstatus: 'recording' })));
+  app.route(() => recordings(1, recording('live', Date.now() - 3600000, Date.now() + 3600000, { recordingstatus: 'recording' })));
   app.element('btnPause').events.click();
-  await tick();
-  await tick();
   const tile = app.state.tiles[0];
+  const direct = await app.findRecordingAtOrAfter(tile.pausedAt, { channel: tile.channel });
+  assert.ok(direct.rec, JSON.stringify({ direct, pausedAt: tile.pausedAt, now: Date.now(), channel: tile.channel }));
+  await app.verifyPausedFootage(tile, tile.pausedAt);
   assert.equal(tile.mode, 'paused');
   assert.equal(tile.noRecording, false);
   assert.equal(tile.el.classList.contains('no-recording'), false);

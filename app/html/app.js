@@ -949,6 +949,7 @@
       const result = await findRecordingAtOrAfter(time, { channel: tile.channel });
       if (tile.mode !== 'paused' || tile.pausedAt !== time) return;
       const has = Boolean(result.rec || result.choices?.length);
+      if (!has) console.log('VERIFY-NO', tile.channel, time, result, state.channelCount, state.channels);
       markNoRecording(tile, !has);
       if (!has) videoMsg(tile, t('video.noRecording'));
       else if (tile.noRecording === false) videoMsg(tile, '');

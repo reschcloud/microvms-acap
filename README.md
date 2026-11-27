@@ -33,6 +33,7 @@ Ein kleines VMS direkt in der Weboberfläche der Kamera:
 
 - **Desktop-Tastatur:** `Space` Pause, `L` Live, `←/→` ±5 s, `Shift+←/→` ±30 s, `1/2/4/6` Raster, `A` Auto-Layout, `F` Vollbild/Theater, `S` Schnappschuss, `E` Auswahl sichern, `?` Hilfe, `Esc` schließt Menü/Inspector/Auswahl/Theater. In Eingabefeldern sind Shortcuts aus.
 - **Vollbild/Theater:** `F` oder das Vollbild-Icon; Topbar und Inspector verschwinden, die Timeline bleibt als schmale Glasleiste mit der aktiven Kanalspur. Die Transportleiste blendet nach 2,5 s Ruhe aus und erscheint bei Bewegung oder Tastatur.
+- **Pause und Aufnahme:** Eine pausierte Kachel fragt die Kamera nach der Aufnahme an der Pause-Zeit. Existiert eine (auch eine folgende), bleibt das Bild normal; nur ohne jede Aufnahme wird es abgedunkelt und mit „Keine Aufzeichnung“ markiert.
 - **Kachel-Zoom:** Doppelklick auf eine Kachel in der Mehrfachansicht zeigt nur diese Kachel; erneuter Doppelklick kehrt zur vorherigen Mehrfachansicht zurück.
 - **Hover-Hilfe:** Einheitliche Tooltips an Buttons, inklusive Kürzel; `?` öffnet die vollständige Hilfe.
 - **Mobil:** Einzelkachel mit Pager, feste Transportleiste unten, Inspector als Vollfläche, Timeline bleibt direkt darunter; Touch-Ziele sind größer.
