@@ -82,7 +82,9 @@
           <div id="modeBadge" class="badge" data-i18n="badge.connecting"></div>
           <div id="clock" class="clock">–</div>
           <div id="videoMsg" class="video-msg hidden" role="status"></div>
+          <span id="tileStateDot" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel" class="tile-label"></div>
+          <button id="tileEmptyCta" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
               <svg class="icon" width="16" height="16"><use id="tileAudioIcon" href="#ic-speaker-off"/></svg>
@@ -98,7 +100,7 @@
                 <label><span data-i18n="tile.stream">Stream</span>
                   <select id="tileStream"></select>
                 </label>
-                <label><span data-i18n="ctl.resolution">Auflösung</span>
+                <label id="tileResolutionRow"><span data-i18n="ctl.resolution">Auflösung</span>
                   <select id="tileResolution">
                     <option value="" data-i18n="ctl.resolution.default">Standard</option>
                     <option value="1920x1080">1920×1080</option>
@@ -115,7 +117,9 @@
           <div id="modeBadge2" class="badge" data-i18n="badge.connecting"></div>
           <div id="clock2" class="clock">–</div>
           <div id="videoMsg2" class="video-msg hidden" role="status"></div>
+          <span id="tileStateDot2" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel2" class="tile-label"></div>
+          <button id="tileEmptyCta2" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio2" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
               <svg class="icon" width="16" height="16"><use id="tileAudioIcon2" href="#ic-speaker-off"/></svg>
@@ -131,7 +135,7 @@
                 <label><span data-i18n="tile.stream">Stream</span>
                   <select id="tileStream2"></select>
                 </label>
-                <label><span data-i18n="ctl.resolution">Auflösung</span>
+                <label id="tileResolutionRow2"><span data-i18n="ctl.resolution">Auflösung</span>
                   <select id="tileResolution2">
                     <option value="" data-i18n="ctl.resolution.default">Standard</option>
                     <option value="1920x1080">1920×1080</option>
@@ -148,7 +152,9 @@
           <div id="modeBadge3" class="badge" data-i18n="badge.connecting"></div>
           <div id="clock3" class="clock">–</div>
           <div id="videoMsg3" class="video-msg hidden" role="status"></div>
+          <span id="tileStateDot3" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel3" class="tile-label"></div>
+          <button id="tileEmptyCta3" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio3" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
               <svg class="icon" width="16" height="16"><use id="tileAudioIcon3" href="#ic-speaker-off"/></svg>
@@ -164,7 +170,7 @@
                 <label><span data-i18n="tile.stream">Stream</span>
                   <select id="tileStream3"></select>
                 </label>
-                <label><span data-i18n="ctl.resolution">Auflösung</span>
+                <label id="tileResolutionRow3"><span data-i18n="ctl.resolution">Auflösung</span>
                   <select id="tileResolution3">
                     <option value="" data-i18n="ctl.resolution.default">Standard</option>
                     <option value="1920x1080">1920×1080</option>
@@ -181,7 +187,9 @@
           <div id="modeBadge4" class="badge" data-i18n="badge.connecting"></div>
           <div id="clock4" class="clock">–</div>
           <div id="videoMsg4" class="video-msg hidden" role="status"></div>
+          <span id="tileStateDot4" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel4" class="tile-label"></div>
+          <button id="tileEmptyCta4" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio4" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
               <svg class="icon" width="16" height="16"><use id="tileAudioIcon4" href="#ic-speaker-off"/></svg>
@@ -197,7 +205,7 @@
                 <label><span data-i18n="tile.stream">Stream</span>
                   <select id="tileStream4"></select>
                 </label>
-                <label><span data-i18n="ctl.resolution">Auflösung</span>
+                <label id="tileResolutionRow4"><span data-i18n="ctl.resolution">Auflösung</span>
                   <select id="tileResolution4">
                     <option value="" data-i18n="ctl.resolution.default">Standard</option>
                     <option value="1920x1080">1920×1080</option>
@@ -214,7 +222,9 @@
           <div id="modeBadge5" class="badge" data-i18n="badge.connecting"></div>
           <div id="clock5" class="clock">–</div>
           <div id="videoMsg5" class="video-msg hidden" role="status"></div>
+          <span id="tileStateDot5" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel5" class="tile-label"></div>
+          <button id="tileEmptyCta5" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio5" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
               <svg class="icon" width="16" height="16"><use id="tileAudioIcon5" href="#ic-speaker-off"/></svg>
@@ -230,7 +240,7 @@
                 <label><span data-i18n="tile.stream">Stream</span>
                   <select id="tileStream5"></select>
                 </label>
-                <label><span data-i18n="ctl.resolution">Auflösung</span>
+                <label id="tileResolutionRow5"><span data-i18n="ctl.resolution">Auflösung</span>
                   <select id="tileResolution5">
                     <option value="" data-i18n="ctl.resolution.default">Standard</option>
                     <option value="1920x1080">1920×1080</option>
@@ -247,7 +257,9 @@
           <div id="modeBadge6" class="badge" data-i18n="badge.connecting"></div>
           <div id="clock6" class="clock">–</div>
           <div id="videoMsg6" class="video-msg hidden" role="status"></div>
+          <span id="tileStateDot6" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel6" class="tile-label"></div>
+          <button id="tileEmptyCta6" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio6" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
               <svg class="icon" width="16" height="16"><use id="tileAudioIcon6" href="#ic-speaker-off"/></svg>
@@ -263,7 +275,7 @@
                 <label><span data-i18n="tile.stream">Stream</span>
                   <select id="tileStream6"></select>
                 </label>
-                <label><span data-i18n="ctl.resolution">Auflösung</span>
+                <label id="tileResolutionRow6"><span data-i18n="ctl.resolution">Auflösung</span>
                   <select id="tileResolution6">
                     <option value="" data-i18n="ctl.resolution.default">Standard</option>
                     <option value="1920x1080">1920×1080</option>
@@ -317,7 +329,13 @@
         <button id="btnZoomIn" data-i18n-title="tl.zoomIn"><svg class="icon" width="16" height="16"><use href="#ic-plus"/></svg></button>
         <button id="btnFitDay" data-i18n="tl.fitShort" data-i18n-title="tl.fitDay"></button>
         <span class="sep"></span>
-        <button id="btnSelectMode" class="toggle" aria-pressed="false" data-i18n="tl.select" data-i18n-title="tl.select.title"></button>
+        <details class="tl-time">
+          <summary data-i18n="tl.jumpTime.short">Zeit</summary>
+          <form id="jumpForm" class="row">
+            <label class="inline"><span data-i18n="tl.jumpTime"></span><input type="datetime-local" id="jumpTime" step="1" required></label>
+            <button type="submit" data-i18n="tl.jump"></button>
+          </form>
+        </details>
         <span class="legend">
           <i class="lg continuous"></i><span data-i18n="tl.legend.record"></span>
           <i class="lg triggered"></i><span data-i18n="tl.legend.triggered"></span>
@@ -331,11 +349,6 @@
         </div>
       </div>
       <div id="timelineStatus" class="tl-status small hidden" role="status"></div>
-      <form id="jumpForm" class="row">
-        <label class="inline"><span data-i18n="tl.jumpTime"></span><input type="datetime-local" id="jumpTime" step="1" required></label>
-        <button type="submit" data-i18n="tl.jump"></button>
-      </form>
-      <div class="hint muted" data-i18n="tl.hint"></div>
     </section>
 
 

@@ -53,7 +53,6 @@
     viewEnd: 0,
     selStart: null,
     selEnd: null,
-    selectMode: false,
     disks: null,
     storageState: 'loading',
     channelCount: 1,
@@ -392,6 +391,8 @@
     const resSel = $(tileId(tile, 'tileResolution'));
     resSel.value = tile.resolution || '';
     resSel.disabled = tile.channel == null;
+    const resRow = $(tileId(tile, 'tileResolutionRow'));
+    if (resRow) resRow.classList.toggle('hidden', state.streamProfiles.length > 0);
 
     updateTileLabel(tile);
     updateTileAudio(tile);
@@ -422,6 +423,13 @@
 
     const audioBtn = $(tileId(tile, 'tileAudio'));
     audioBtn.addEventListener('click', () => setTileAudio(tile, !tile.audio));
+    const emptyCta = $(tileId(tile, 'tileEmptyCta'));
+    emptyCta.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const details = $(tileId(tile, 'tileOptions'));
+      details.open = true;
+      $(tileId(tile, 'tileChannel')).focus?.();
+    });
     updateTileAudio(tile);
     applyTileMuted(tile);
   }
@@ -975,6 +983,8 @@
     tile.el.classList.toggle('empty', empty);
     label.textContent = empty ? t('tile.empty') : channelName(tile.channel);
     label.classList.toggle('hidden', !multiChannel() && state.layoutSize === 1);
+    const cta = $(tileId(tile, 'tileEmptyCta'));
+    if (cta) cta.classList.toggle('hidden', !empty);
   }
 
   function updateTileBadge(tile) {
@@ -991,6 +1001,7 @@
     }
     badge.className = `badge ${key}`;
     badge.textContent = t(`badge.${key}`);
+    tile.el.setAttribute('data-state', key);
   }
 
   let audioUnlocked = false;
@@ -1119,7 +1130,7 @@
   const xOf = (time) => ((time - state.viewStart) / (state.viewEnd - state.viewStart)) * canvasWidth();
   const tOf = (x) => state.viewStart + (x / canvasWidth()) * (state.viewEnd - state.viewStart);
   const LANE_TOP = 24;
-  const LANE_HEIGHT = 30;
+  const LANE_HEIGHT = 32;
 
   /** Unique visible channels in tile order (duplicate tiles share one lane). */
   function timelineChannels() {
@@ -1447,9 +1458,12 @@
   canvas.addEventListener('pointerdown', (ev) => {
     if (!ev.isPrimary || ev.button !== 0) return;
     canvas.setPointerCapture(ev.pointerId);
-    const selecting = state.selectMode || ev.shiftKey;
-    drag = { id: ev.pointerId, x0: ev.offsetX, view0: [state.viewStart, state.viewEnd], moved: false, selecting, t0: tOf(ev.offsetX) };
-    if (selecting) canvas.classList.add('selecting');
+    const mode = ev.altKey ? 'pan' : (ev.offsetY < LANE_TOP || ev.shiftKey ? 'select' : 'pan');
+    drag = {
+      id: ev.pointerId, x0: ev.offsetX, view0: [state.viewStart, state.viewEnd],
+      moved: false, mode, t0: tOf(ev.offsetX),
+    };
+    if (mode === 'select') canvas.classList.add('selecting');
   });
   canvas.addEventListener('pointermove', (ev) => {
     const tip = $('tlTooltip');
@@ -1461,7 +1475,7 @@
     const dx = ev.offsetX - drag.x0;
     if (Math.abs(dx) > 3) drag.moved = true;
     if (!drag.moved) return;
-    if (drag.selecting) {
+    if (drag.mode === 'select') {
       state.selStart = drag.t0;
       state.selEnd = Math.min(tOf(ev.offsetX), Date.now());
       syncSelectionInputs();
@@ -1479,28 +1493,28 @@
     if (drag?.id !== ev.pointerId) return;
     const d = drag;
     drag = null;
-    canvas.classList.toggle('selecting', state.selectMode);
-    if (!d.moved && !d.selecting) {
-      const time = Math.round(tOf(ev.offsetX));
-      const hit = timelineRecordingAt(ev.offsetX, ev.offsetY, time);
-      if (hit?.rec) {
-        const tile = tileForChannel(hit.channel);
-        setActiveTile(tile);
-        newPlaybackIntent(tile);
-        const at = Math.max(hit.rec.start, Math.min(time, recStop(hit.rec) - 1));
-        startRecording(tile, hit.rec, at);
-        for (const other of visibleTiles()) if (other !== tile) playAt(at, { tile: other });
-      } else if (hit?.unknown) {
-        playAt(time, { preferUnassigned: true, tile: tileForChannel(hit.channel) });
-      } else {
-        playAtAll(time);
-      }
+    canvas.classList.remove('selecting');
+    if (d.moved) return;
+    clearSelection();
+    const time = Math.round(tOf(ev.offsetX));
+    const hit = timelineRecordingAt(ev.offsetX, ev.offsetY, time);
+    if (hit?.rec) {
+      const tile = tileForChannel(hit.channel);
+      setActiveTile(tile);
+      newPlaybackIntent(tile);
+      const at = Math.max(hit.rec.start, Math.min(time, recStop(hit.rec) - 1));
+      startRecording(tile, hit.rec, at);
+      for (const other of visibleTiles()) if (other !== tile) playAt(at, { tile: other });
+    } else if (hit?.unknown) {
+      playAt(time, { preferUnassigned: true, tile: tileForChannel(hit.channel) });
+    } else {
+      playAtAll(time);
     }
   });
   for (const type of ['pointercancel', 'lostpointercapture']) canvas.addEventListener(type, (ev) => {
     if (drag?.id !== ev.pointerId) return;
     drag = null;
-    canvas.classList.toggle('selecting', state.selectMode);
+    canvas.classList.remove('selecting');
   });
   canvas.addEventListener('pointerleave', () => $('tlTooltip').classList.add('hidden'));
   canvas.addEventListener('wheel', (ev) => {
@@ -1527,6 +1541,16 @@
     state.selEnd = state.selStart == null ? null : b;
     if (!exportAbort) $('expInfo').textContent = !Number.isFinite(a) || !Number.isFinite(b) ? ''
       : b > a ? t('exp.duration', { d: fmtDuration(b - a) }) : t('exp.endBeforeStart');
+    updateExportCheckboxes();
+    draw();
+  }
+
+  function clearSelection() {
+    state.selStart = state.selEnd = null;
+    dragExportRange = null;
+    $('expStart').value = $('expEnd').value = '';
+    $('expInfo').textContent = '';
+    $('expLinks').innerHTML = '';
     updateExportCheckboxes();
     draw();
   }
@@ -2123,27 +2147,13 @@
     if (time < state.viewStart || time >= state.viewEnd) showDay(startOfDay(time));
     playAt(time);
   });
-  $('btnSelectMode').addEventListener('click', () => {
-    state.selectMode = !state.selectMode;
-    $('btnSelectMode').classList.toggle('active', state.selectMode);
-    $('btnSelectMode').setAttribute('aria-pressed', String(state.selectMode));
-    canvas.classList.toggle('selecting', state.selectMode);
-  });
 
   $('expStart').addEventListener('change', selectionFromInputs);
   $('expEnd').addEventListener('change', selectionFromInputs);
   $('expPwEnable').addEventListener('change', (ev) => $('expPwRow').classList.toggle('hidden', !ev.target.checked));
   $('btnExport').addEventListener('click', () => doExport(...selectedExportRange()));
   $('btnCancelExport').addEventListener('click', () => { if (exportAbort) exportAbort.abort(); });
-  $('btnClearSel').addEventListener('click', () => {
-    state.selStart = state.selEnd = null;
-    dragExportRange = null;
-    $('expStart').value = $('expEnd').value = '';
-    $('expInfo').textContent = '';
-    $('expLinks').innerHTML = '';
-    updateExportCheckboxes();
-    draw();
-  });
+  $('btnClearSel').addEventListener('click', clearSelection);
   $('btnEnableRec').addEventListener('click', enableContinuous);
   $('btnDisableRec').addEventListener('click', disableContinuous);
   $('recAudio').addEventListener('change', () => store.set('rec.audio', $('recAudio').checked ? '1' : '0'));

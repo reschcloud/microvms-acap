@@ -430,6 +430,7 @@ test('a manual 4-tile layout keeps empty slots and allows a free channel choice'
   assert.equal(app.state.tiles[3].channel, null);
   assert.equal(app.state.tiles[3].visible, true);
   assert.equal(app.element('tile3').classList.contains('empty'), true);
+  assert.equal(app.element('tileEmptyCta4').classList.contains('hidden'), false);
   assert.equal(app.element('tileChannel4').options[0].textContent, 'tile.empty');
 
   const select = app.element('tileChannel2');
@@ -490,6 +491,25 @@ test('snapshot uses the live JPEG endpoint and playback frames without a live JP
   app.element('btnSnapshot').events.click();
   assert.equal(app.downloads.length, 3);
   assert.match(app.downloads[2], /^data:image\/jpeg/);
+});
+
+test('dragging the time ruler creates an export range and a click clears it', async () => {
+  const app = await browser();
+  app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
+  const canvas = app.element('timeline');
+  const down = { isPrimary: true, button: 0, pointerId: 1, offsetX: 100, offsetY: 5 };
+  const move = { isPrimary: true, button: 0, pointerId: 1, offsetX: 320, offsetY: 5 };
+  canvas.events.pointerdown(down);
+  canvas.events.pointermove(move);
+  canvas.events.pointerup(move);
+  assert.ok(app.state.selStart != null);
+  assert.ok(app.state.selEnd > app.state.selStart);
+
+  const click = { isPrimary: true, button: 0, pointerId: 2, offsetX: 200, offsetY: 32 };
+  canvas.events.pointerdown(click);
+  canvas.events.pointerup(click);
+  assert.equal(app.state.selStart, null);
+  assert.equal(app.state.selEnd, null);
 });
 
 test('timeline messages sit in the timeline panel and vanish when empty', async () => {
