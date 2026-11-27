@@ -291,6 +291,7 @@
       renderTileMenu(tile);
     });
     syncLayoutControls();
+    renderPager();
     updateAllTileUi();
     updateModeUi(activeTile());
     resizeCanvas();
@@ -1047,6 +1048,20 @@
     else if (on && tile.mode === 'playback') playAt(currentWall(tile), { reuseManual: true, tile });
   }
 
+  function renderPager() {
+    const visible = state.tiles.filter((tile) => tile.visible);
+    $('tilePager').classList.toggle('hidden', visible.length < 2);
+    const index = Math.max(0, visible.indexOf(activeTile()));
+    $('pagerDots').textContent = `${index + 1} / ${Math.max(1, visible.length)}`;
+  }
+
+  function stepPager(delta) {
+    const visible = state.tiles.filter((tile) => tile.visible);
+    if (!visible.length) return;
+    const index = Math.max(0, visible.indexOf(activeTile()));
+    setActiveTile(visible[(index + delta + visible.length) % visible.length]);
+  }
+
   function updateAllTileUi() {
     for (const tile of state.tiles) {
       updateTileLabel(tile);
@@ -1061,6 +1076,7 @@
     const changed = state.active !== tile.id || prev !== tile.channel;
     state.active = tile.id;
     state.tiles.forEach((t) => t.el.classList.toggle('active', t === tile));
+    renderPager();
     updateModeUi(tile);
     if (!changed) return;
     if (tile.channel != null) store.set('channel', String(tile.channel));
@@ -2211,6 +2227,8 @@
     updateModeUi();
   }
 
+  $('pagerPrev').addEventListener('click', () => stepPager(-1));
+  $('pagerNext').addEventListener('click', () => stepPager(1));
   $('btnTheater').addEventListener('click', () => setTheater(!state.theater));
   $('btnHelp').addEventListener('click', openHelp);
   $('btnHelpClose').addEventListener('click', closeHelp);

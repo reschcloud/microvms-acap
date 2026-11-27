@@ -3,30 +3,38 @@
 Ein kleines VMS direkt in der Weboberfläche der Kamera:
 
 - **Live-Ansicht** (H.264 über RTSP-over-WebSocket → HTML5-Video/MSE) als 1er-, 2er-, 4er- oder 6er-Raster. Der Standard richtet sich nach der Zahl der aktiven Kanäle; leere Kacheln bleiben sichtbar und sind frei belegbar. Jede Kachel hat ein eigenes Lautsprecher-Icon; mehrere Kacheln können gleichzeitig Ton haben.
-- **Mehrere Kanäle/Sensoren** (Multisensor-Kameras, Encoder, View Areas, Quad-Ansicht): Jede Kachel hat ein eigenes Menü für Kanal, Streamprofil und Auflösung (`Properties.Image.NbrOfViews`, Namen aus `Image.I#.Name`, deaktivierte Kanäle sind nicht auswählbar). Bei mehr als sechs Kanälen liegen die ersten sechs auf den Kacheln, der Rest ist über das Kachelmenü erreichbar. PTZ, Seitenleiste und Schnappschuss beziehen sich auf die aktive (angeklickte) Kachel. Die Timeline zeigt alle sichtbaren Kanäle; der Export folgt den Kanal-Haken.
+- **Mehrere Kanäle/Sensoren** (Multisensor-Kameras, Encoder, View Areas, Quad-Ansicht): Jede Kachel hat ein eigenes Menü für Kanal, Streamprofil und Auflösung (`Properties.Image.NbrOfViews`, Namen aus `Image.I#.Name`, deaktivierte Kanäle sind nicht auswählbar). Bei mehr als sechs Kanälen liegen die ersten sechs auf den Kacheln, der Rest ist über das Kachelmenü erreichbar. PTZ, Inspector und Schnappschuss beziehen sich auf die aktive (angeklickte) Kachel. Die Timeline zeigt alle sichtbaren Kanäle; der Export folgt den Kanal-Chips in der Auswahlleiste.
 - **Stream-Profile**: Auswahl der auf der Kamera angelegten Profile (`streamprofile.cgi`) pro Kachel, H.264 wird dabei erzwungen. Automatisch: Einzelansicht nimmt das größte, Mehrfachansicht das kleinste auflösbare Profil; die Wahl wird pro Kanal gemerkt.
-- **Zweisprachig (Deutsch/English)**: automatisch nach Browsersprache, umschaltbar oben rechts (Auswahl wird gemerkt)
-- **Timeline** der Edge-Storage-Aufzeichnungen (SD-Karte / NAS) mit Kalendertagen, Zoom (Mausrad), Verschieben (Ziehen) und direktem Sprung zu Datum/Uhrzeit
+- **Zweisprachig (Deutsch/English)**: automatisch nach Browsersprache, umschaltbar im Statusmenü (Auswahl wird gemerkt).
+- **Aufgeräumte Oberfläche**: schmale Topbar mit Layout-Segmenten, Statusmenü und Inspector (Werkzeuge) statt fester Seitenleiste; Video und Timeline nutzen die volle Breite. Dunkles Graphit, ein Blau als Akzent, sichtbare Fokusringe und Tooltips mit Tastenkürzen.
+- **Timeline** der Edge-Storage-Aufzeichnungen (SD-Karte / NAS) mit Kalendertagen, Zoom (Mausrad/Pinch), direkter Manipulation und „Zeit“-Popover für exakte Sprünge
   - Eine Spur pro sichtbarem Kanal, immer synchron: Blau für alle Aufzeichnungen, Gelb für Ereignisse (Überlappung bleibt gelb); mehrdeutige Aufnahmen als graue Leiste.
-  - Links an jeder Kanalspur ein Export-Haken, Standard alle an; er wird mit einer Zeitauswahl aktiv.
+  - Zeitlineal ziehen = Bereich wählen; in einer Spur ziehen = verschieben; Klick = springen und Auswahl löschen; Alt+Ziehen = immer verschieben. Eine Auswahl öffnet die Exportleiste mit Kanal-Chips (Standard alle an).
   - Ein Klick auf die Zeitachse spielt alle Kacheln ab diesem Zeitpunkt; ein Klick auf einen gelben Ereignisabschnitt öffnet genau diesen Clip, die anderen Kacheln springen auf dieselbe Zeit.
   - ±30 s, −5 s, Pause (Pause im Live-Modus = Timeshift: „Weiter“ spielt ab dem Pausenzeitpunkt aus der Aufzeichnung); Bedienelemente mit Inline-SVG-Icons
-- **Clip exportieren**: Zeitraum im Formular oder auf der Timeline wählen, **Export starten** – der Download beginnt sofort, ohne Zwischendialog. Aufnahmelücken und die Anzahl der Teile stehen danach unter den Buttons. Die Kamera kann Ausschnitte am vorherigen Keyframe beginnen; exportiertes Material kann daher vor dem gewählten Start liegen.
+- **Clip exportieren**: Zeitraum auf der Timeline wählen, **Sichern** – der Download beginnt sofort, ohne Zwischendialog. Optionen (Name, exakte Zeiten, Zusammenfügen, Passwort, Audio) liegen hinter „Optionen“. Aufnahmelücken und Fortschritt stehen in der Auswahlleiste; fertige Dateien im Inspector. Die Kamera kann Ausschnitte am vorherigen Keyframe beginnen; exportiertes Material kann daher vor dem gewählten Start liegen.
   - Liegt der Zeitraum über mehreren Aufzeichnungen (Unterbrechung, Neustart, Ereignisaufzeichnungen), lädt der Browser die Teil-Exporte nacheinander und fügt sie ohne Neukodierung zu einer Datei zusammen (`html/mkvconcat.js`): fortlaufende Zeitstempel, Lücken übersprungen, mit Dauer, Aufnahmedatum und Index (Cues) → in VLC & Co. normal spulbar
   - Fortschrittsanzeige und Abbrechen
   - Fallback auf Einzeldateien, wenn sich die Videoparameter zwischen den Aufzeichnungen unterscheiden (z. B. Auflösung geändert)
   - Optional passwortgeschützt als ZIP (AES-256) – dann allerdings als Einzeldateien, weil verschlüsselte ZIPs nicht zusammengefügt werden können
-  - Mehrkanal: Die Haken links an den Timeline-Spuren bestimmen die Kanäle; pro Kanal entsteht eine eigene Datei (`…_ch<N>_…mkv`). Wegen Browser-Downloadlimits wird die erste Datei automatisch gestartet, weitere stehen als Links bereit.
+  - Mehrkanal: Die Chips in der Auswahlleiste bestimmen die Kanäle; pro Kanal entsteht eine eigene Datei (`…_ch<N>_…mkv`). Wegen Browser-Downloadlimits wird die erste Datei automatisch gestartet, weitere stehen als Links bereit.
   - „Audio einschließen“ ist standardmäßig an. Ohne Audio werden gemergte Exporte und unverschlüsselte Einzeldateien im Browser ohne Neukodierung neu gemuxt (Audiospur entfernt); bei passwortgeschützten ZIPs wird die Kombination abgelehnt.
 - **Ton pro Kachel**: Lautsprecher-Icon in jeder Kachel, mehrere gleichzeitig möglich. AAC über MSE; die Wahl wird pro Kanal gemerkt, startet nach einem Reload aber erst nach der ersten Nutzergeste hörbar. Wiedergabe mit Ton nur bei Aufnahmen, die eine Tonspur enthalten.
 - **Schnappschuss**: Live als JPEG über die Kamera-API; in Wiedergabe und Pause als Frame des sichtbaren Bildes mit Zeitstempel im Dateinamen.
 - **Netzanzeige**: Ping zur Kamera (alle 5 s, pausiert im Hintergrund-Tab) und die am Browser eingehende Stream-Bandbreite (Summe aller Kacheln).
 - **PTZ-Steuerung** – erscheint nur, wenn die Kamera PTZ kann (`Properties.PTZ.PTZ=yes`) **und** der angemeldete Benutzer PTZ-Rechte hat (Gruppe `ptz` bzw. Admin, ermittelt über `/axis-cgi/usergroup.cgi`)
   - Steuerkreuz und Zoom (gedrückt halten), Geschwindigkeit, Home, Presets anfahren
-  - Klick ins Livebild zentriert, Mausrad zoomt auf die Mausposition; Tastatur: Pfeiltasten, + / −
-  - Nur in der Live-Ansicht aktiv und folgt der aktiven Kachel; bei Fokusverlust/Tabwechsel wird jede Bewegung sofort gestoppt
+  - Klick ins Livebild zentriert, Mausrad zoomt auf die Mausposition; Tastatur: Alt+Pfeiltasten, Alt+ + / − (normale Pfeile gehören der Timeline)
+  - Nur in der Live-Ansicht aktiv und folgt der aktiven Kachel; als kompakte Glasfläche über dem Bild, bei Fokusverlust/Tabwechsel wird jede Bewegung sofort gestoppt
   - Bedienelemente, die das Gerät laut `ptz.cgi?info=1` nicht kann, werden ausgeblendet
-- **Aufnahmestatus** am Livebild: „Aufnahme läuft“ nur bei einer von der Kamera als laufend gemeldeten Aufnahme. Ein klassisches Daueraufnahmeprofil allein gilt als „konfiguriert“. Dort und in der Speicheranzeige steht auch, wenn die SD-Karte nicht beschreibbar ist. Eine Daueraufzeichnung lässt sich in der Seitenleiste für den gewählten Kanal starten und wieder beenden (Profil wird entfernt); optional wird sie mit AAC-Ton angelegt.
+- **Aufnahmestatus** am Livebild: „Aufnahme läuft“ nur bei einer von der Kamera als laufend gemeldeten Aufnahme. Ein klassisches Daueraufnahmeprofil allein gilt als „konfiguriert“. Im Statuschip und im Inspector steht auch, wenn die SD-Karte nicht beschreibbar ist. Eine Daueraufzeichnung lässt sich im Inspector für den gewählten Kanal starten und wieder beenden (Profil wird entfernt); optional wird sie mit AAC-Ton angelegt.
+
+### Bedienung
+
+- **Desktop-Tastatur:** `Space` Pause, `L` Live, `←/→` ±5 s, `Shift+←/→` ±30 s, `1/2/4/6` Raster, `A` Auto-Layout, `F` Vollbild/Theater, `S` Schnappschuss, `E` Auswahl sichern, `?` Hilfe, `Esc` schließt Menü/Inspector/Auswahl/Theater. In Eingabefeldern sind Shortcuts aus.
+- **Vollbild/Theater:** `F` oder das Vollbild-Icon; Topbar und Inspector verschwinden, die Timeline bleibt als schmale Glasleiste mit der aktiven Kanalspur. Die Transportleiste blendet nach 2,5 s Ruhe aus und erscheint bei Bewegung oder Tastatur.
+- **Hover-Hilfe:** Einheitliche Tooltips an Buttons, inklusive Kürzel; `?` öffnet die vollständige Hilfe.
+- **Mobil:** Einzelkachel mit Pager, feste Transportleiste unten, Inspector als Vollfläche, Timeline bleibt direkt darunter; Touch-Ziele sind größer.
 
 Kein eigener Server-Prozess: Die Oberfläche spricht direkt die VAPIX-APIs der Kamera an (gleiche Origin, die Anmeldung an der Kamera wird mitverwendet).
 
