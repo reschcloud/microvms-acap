@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock,
+    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -93,7 +93,8 @@ async function browser({ route: startRoute, session } = {}) {
       const url = new URL(href, 'https://camera.invalid');
       requests.push(url);
       const body = await handler(url, opts);
-      return body?.ok === false ? body : { ok: true, text: async () => body, json: async () => ({}) };
+      const json = async () => (typeof body === 'string' ? (body.trim().startsWith('{') ? JSON.parse(body) : {}) : (body ?? {}));
+      return body?.ok === false ? body : { ok: true, text: async () => body, json };
     },
     setInterval() {}, setTimeout() {}, clearTimeout() {}, addEventListener() {},
     getComputedStyle: () => ({ getPropertyValue: () => '' }),
@@ -135,8 +136,8 @@ test('reported views fill the tiles and each tile has its own channel menu', asy
   assert.equal(app.element('tile0').classList.contains('hidden'), false);
   assert.equal(app.element('tile1').classList.contains('hidden'), false);
   assert.equal(app.element('tile2').classList.contains('hidden'), true);
-  assert.match(app.element('tileLabel').textContent, /channel\.default/);
-  assert.equal(app.element('tileLabel2').textContent, 'Eingang');
+  assert.match(app.element('tileName').textContent, /channel\.default/);
+  assert.equal(app.element('tileName2').textContent, 'Eingang');
   assert.deepEqual(app.element('tileChannel').options.map((o) => o.textContent), [
     'tile.empty', 'channel.default {"n":1}', '2: Eingang',
   ]);
@@ -182,6 +183,7 @@ test('visible channels get separate lanes and a timeline click seeks all tiles',
   app.state.sourceCatalog = ['1', '2'];
   app.state.tiles[1].channel = 2;
   app.state.tiles[1].visible = true;
+  app.state.tiles[0].mode = app.state.tiles[1].mode = 'paused';   // archive: lanes unfold
   app.route(() => recordings(2,
     recording('one', fixtureTime, fixtureTime + 60000, { source: '1' }),
     recording('two', fixtureTime, fixtureTime + 60000, { source: '2' }),
@@ -357,6 +359,7 @@ test('shortcut resolution and theater mode follow the desktop rules', async () =
   app.state.channelCount = 2;
   app.state.tiles[1].channel = 2;
   app.state.tiles[1].visible = true;
+  app.state.tiles[0].mode = app.state.tiles[1].mode = 'paused';
   assert.equal(app.timelineLanes().length, 2);
   app.setTheater(true);
   assert.equal(app.state.theater, true);
@@ -709,7 +712,7 @@ test('a manual 4-tile layout keeps empty slots and allows a free channel choice'
   select.events.change();
   assert.equal(app.state.tiles[1].channel, 3);
   assert.equal(app.state.tiles[1].channelTouched, true);
-  assert.match(app.element('tileLabel2').textContent, /channel\.default/);
+  assert.match(app.element('tileName2').textContent, /channel\.default/);
 });
 
 test('the layout selector switches 1/2/4/6 and keeps the first six channels', async () => {
@@ -1255,4 +1258,96 @@ test('a seek into a gap jumps silently to the next recording', async () => {
   await app.playAt(fixtureTime);
   assert.equal(app.state.startWall, fixtureTime + 60000);
   assert.doesNotMatch(app.element('toast').textContent, /jumpTo/);
+});
+
+test('the timeline folds to one strip in live view and unfolds for archive and export', async () => {
+  const app = await browser();
+  twoChannels(app);
+  const [first, second] = app.state.tiles;
+  second.channel = 2;
+  second.visible = true;
+  app.goLive(true, second);
+  app.state.recordingsByChannel.set(1, { recs: [{ id: 'a', type: 'continuous', start: 1, stop: 2 }], unknown: [], complete: true });
+  app.state.recordingsByChannel.set(2, { recs: [{ id: 'b', type: 'triggered', start: 1, stop: 2 }], unknown: [], complete: true });
+  // Live: one merged lane with every channel's footage, slimmer than a normal lane.
+  let lanes = app.timelineLanes();
+  assert.equal(lanes.length, 1);
+  assert.equal(JSON.stringify(lanes[0].recs.map((r) => r.id)), '["a","b"]');
+  assert.ok(app.laneGeometry(0).height < 36);
+
+  app.element('btnPause').events.click();        // archive
+  lanes = app.timelineLanes();
+  assert.equal(JSON.stringify(lanes.map((lane) => lane.channel)), '[1,2]');
+  assert.equal(app.laneGeometry(0).height, 36);
+
+  app.goLive(true, first);
+  app.goLive(true, second);
+  assert.equal(app.timelineLanes().length, 1);
+  app.element('btnExport').events.click();       // export always shows the lanes
+  assert.equal(app.timelineLanes().length, 2);
+});
+
+test('the tile tab shows a state dot, the channel name and the time; no big live badge', async () => {
+  const app = await browser();
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  const css = readFileSync(require.resolve('../app/html/style.css'), 'utf8');
+  const tab = html.match(/<div id="tileLabel"[^>]*>(.*?)<\/div>/)[1];
+  assert.match(tab, /class="tile-dot"/);
+  assert.match(tab, /id="tileName"/);
+  assert.match(tab, /id="clock"/);
+  assert.match(css, /\.badge\s*\{[^}]*clip: rect\(0, 0, 0, 0\)/, 'badge only for screen readers');
+
+  const tile = app.state.tiles[0];
+  app.element('video').events.playing();
+  assert.equal(tile.el.getAttribute?.('data-state') ?? 'live', 'live');
+  assert.equal(tile.el.classList.contains('recording'), false);
+
+  // The camera records channel 1 right now: the live dot turns red.
+  app.route(() => recordings(1, recording('now', Date.now() - 60000, null, { recordingstatus: 'recording' })));
+  await app.refreshActiveRecording();
+  assert.equal(app.state.recordingNow.get(1), true);
+  assert.equal(tile.el.classList.contains('recording'), true);
+  // Playback is never "recording".
+  app.route(() => recordings(1, recording('clip')));
+  await app.playAt(fixtureTime + 1000);
+  app.element('video').events.playing();
+  assert.equal(tile.el.classList.contains('recording'), false);
+});
+
+test('the device section lists model, serial, firmware and the IPv4/IPv6 addresses', async () => {
+  const app = await browser();
+  const info = JSON.stringify({ data: { propertyList: {
+    ProdFullName: 'AXIS M4317-PLVE Panoramic Camera', ProdShortName: 'AXIS M4317-PLVE', SerialNumber: 'B8A44F000001', Version: '12.6.85',
+  } } });
+  const network = JSON.stringify({ data: {
+    system: { hostname: { hostname: 'axis-b8a44f000001' } },
+    devices: [{ IPv4: { addresses: [{ address: '192.168.1.20' }] }, IPv6: { addresses: [{ address: 'fe80::1' }, { address: '2001:db8::20' }] } }],
+  } });
+  app.route((url) => {
+    if (url.pathname.endsWith('/basicdeviceinfo.cgi')) return info;
+    if (url.pathname.endsWith('/network_settings.cgi')) return network;
+  });
+  await app.loadDeviceInfo();
+  const pairs = (rows) => Object.fromEntries(rows.reduce((acc, el, i) => (i % 2 ? acc : [...acc, [el.textContent, rows[i + 1].textContent]]), []));
+  const shown = pairs(app.element('deviceInfo').options);
+  assert.equal(shown['device.model'], 'AXIS M4317-PLVE Panoramic Camera');
+  assert.equal(shown['device.serial'], 'B8A44F000001');
+  assert.equal(shown['device.firmware'], '12.6.85');
+  assert.equal(shown['device.hostname'], 'axis-b8a44f000001');
+  assert.equal(shown['device.ipv4'], '192.168.1.20');
+  assert.equal(shown['device.ipv6'], 'fe80::1\n2001:db8::20');
+  assert.equal(app.element('deviceName').textContent, 'AXIS M4317-PLVE · B8A44F000001');
+
+  // Without rights for the network API the Network parameters still help.
+  app.route((url) => {
+    if (url.pathname.endsWith('/network_settings.cgi')) return bad(403);
+    if (url.searchParams.get('group') === 'Network') {
+      return 'root.Network.eth0.IPAddress=10.0.0.5\nroot.Network.eth0.IPv6.IPAddresses=2001:db8::5\nroot.Network.HostName=cam';
+    }
+  });
+  await app.loadDeviceInfo();
+  const fallback = pairs(app.element('deviceInfo').options);
+  assert.equal(fallback['device.ipv4'], '10.0.0.5');
+  assert.equal(fallback['device.ipv6'], '2001:db8::5');
+  assert.equal(fallback['device.hostname'], 'cam');
 });

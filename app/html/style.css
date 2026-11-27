@@ -276,25 +276,12 @@ label input:not([type="checkbox"]), label select { width: 100%; color: var(--tex
 /* No footage at the held time: no timestamp either. */
 .video-wrap.no-recording .clock { display: none; }
 
-/* Overlay chips on the picture: always dark, always the same size. */
-.tile-label, .clock, .badge {
-  position: absolute;
-  z-index: 3;
-  padding: 4px 10px;
-  border-radius: 8px;
-  background: var(--overlay);
-  color: var(--overlay-text);
-  pointer-events: none;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  white-space: nowrap;
+/* The state lives in the tab dot; the text badge stays for screen readers only. */
+.badge {
+  position: absolute !important;
+  width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
-.tile-label { top: 10px; left: 10px; font-weight: 600; max-width: calc(100% - 220px); overflow: hidden; text-overflow: ellipsis; }
-.clock { top: 10px; right: 10px; font-variant-numeric: tabular-nums; }
-.badge { bottom: 10px; left: 10px; font-weight: 600; }
-.badge.live { background: var(--live); }
-.badge.playback { background: var(--accent); }
-.badge.empty { display: none; }
 
 .tile-tools { position: absolute; z-index: 4; right: 10px; bottom: 10px; display: flex; gap: 6px; }
 .tile-icon {
@@ -393,8 +380,7 @@ button.tile-icon.audio-on { background: var(--accent); }
 .channel-choice.active { background: var(--accent); color: var(--on-accent); }
 
 /* Channel name: a small tab on the tile edge, outside the picture. */
-.video-wrap { display: flex; flex-direction: column; background: transparent; --tab: 0px; }
-.video-wrap:has(> .tile-label:not(.hidden)) { --tab: 28px; }
+.video-wrap { display: flex; flex-direction: column; background: transparent; --tab: 28px; }
 .video-wrap video { flex: 1; min-height: 0; height: auto; }
 .video-wrap > .tile-label {
   position: static;
@@ -406,6 +392,11 @@ button.tile-icon.audio-on { background: var(--accent); }
   margin-left: 12px;
   padding: 0 12px;
   line-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
   border-radius: 10px 10px 0 0;
   background: var(--surface-2);
   color: var(--text);
@@ -415,7 +406,17 @@ button.tile-icon.audio-on { background: var(--accent); }
 }
 .video-grid:not(.layout-1) .video-wrap.active > .tile-label { background: var(--accent); color: var(--on-accent); }
 .video-grid:not(.layout-1) .video-wrap.active video { outline: 2px solid var(--accent); outline-offset: -2px; }
-.video-wrap .clock { top: calc(var(--tab) + 10px); }
+.tile-name { overflow: hidden; text-overflow: ellipsis; }
+.tile-label .clock { font-weight: 400; font-variant-numeric: tabular-nums; opacity: .8; }
+/* State dot: green live, red live while recording, blue playback,
+   yellow while connecting or seeking, gray when paused or without picture. */
+.tile-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.video-wrap[data-state="live"] .tile-dot { background: var(--ok); }
+.video-wrap.recording[data-state="live"] .tile-dot { background: var(--live); box-shadow: 0 0 0 3px rgba(232, 33, 39, .25); }
+.video-wrap[data-state="playback"] .tile-dot { background: var(--accent); }
+.video-wrap[data-state="connecting"] .tile-dot,
+.video-wrap[data-state="seeking"] .tile-dot { background: var(--export); }
+.video-grid:not(.layout-1) .video-wrap.active[data-state="playback"] .tile-dot { background: #fff; }
 .video-wrap .video-msg, .video-wrap .tile-empty-cta, .video-wrap .channel-picker { top: calc(50% + var(--tab) / 2); }
 .video-wrap .tile-empty-cta:active { transform: translate(-50%, -50%) scale(.98); }
 /* An empty slot is a quiet placeholder in the page colors, not a black picture. */
@@ -506,6 +507,13 @@ button.tile-icon.audio-on { background: var(--accent); }
 
 
 .tl-body { display: flex; gap: 10px; align-items: flex-start; margin-top: 12px; }
+/* Live: the timeline folds to one slim strip; the archive and export unfold it. */
+body.timeline-compact .tl-toolbar,
+body.timeline-compact .tl-labels,
+body.timeline-compact .selection-bar { display: none !important; }
+body.timeline-compact .timeline-panel { padding: 6px 12px 8px; }
+body.timeline-compact .tl-body { margin-top: 0; }
+body.timeline-compact .tl-status { display: none; }
 .tl-labels { flex: 0 0 150px; display: flex; flex-direction: column; min-width: 0; }
 /* Keep in sync with LANE_TOP / LANE_HEIGHT in app.js. */
 .tl-label { display: flex; align-items: center; height: 36px; min-width: 0; color: var(--text); }
@@ -595,7 +603,10 @@ label.tl-label { flex-direction: row; gap: 10px; color: var(--text); cursor: poi
 .setting { display: flex; flex-direction: column; gap: 10px; }
 .net-status { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
 .row-button { justify-content: flex-start; width: 100%; }
-.setting:has(#deviceName:empty) { display: none; }
+.setting:has(#deviceInfo:empty) { display: none; }
+.device-info { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; }
+.device-info dt { color: var(--muted); }
+.device-info dd { margin: 0; white-space: pre-line; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 
 .storage-card { display: flex; flex-direction: column; gap: 10px; }
 .storage-row { display: flex; align-items: center; gap: 8px; min-width: 0; }

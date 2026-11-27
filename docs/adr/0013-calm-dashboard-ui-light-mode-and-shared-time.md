@@ -27,11 +27,17 @@ UI, in the style of a car dashboard:
 - **Secondary information is out of the way.** Ping, bandwidth, storage, device
   name, language, appearance, and help live in a settings sheet that is
   **closed by default**. The topbar keeps the recording status chip.
-- **Tiles** show only what matters: clock and one state pill (Live red,
-  Playback blue, others neutral). The channel name (multi-channel only) is a
-  small tab on the tile edge, outside the picture, so it never covers the
-  camera's own text overlay; the active tile's tab is blue. A tile held without
-  footage shows no timestamp. Empty slots are a themed placeholder with
+- **Tiles** carry one small tab on the edge, outside the picture, so it never
+  covers the camera's own text overlay: a state dot (green live, red live while
+  the camera records that channel, blue playback, yellow connecting/seeking,
+  gray paused/no picture), the channel name and the current time. The active
+  tile's tab is blue. There is no text badge on the picture (it stays for screen
+  readers). A tile held without footage shows no timestamp.
+- **The timeline folds itself:** one slim merged strip while every tile is live,
+  the full lanes with toolbar in the archive (playback, pause, seek) and while
+  exporting. A click into the strip enters the archive.
+- **Device details** in the settings: model, serial, firmware, host name, IPv4
+  and IPv6 (network API, else Network parameters, else the browser's address). Empty slots are a themed placeholder with
   "Choose channel". Overlays on video stay dark in both themes.
 - **Transport:** play/pause sits between two equal halves, so it is always
   exactly centered under the tiles. The Live button always reads "Live".

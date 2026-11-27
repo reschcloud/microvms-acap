@@ -78,9 +78,8 @@
       <div id="videoGrid" class="video-grid layout-1">
         <div class="video-wrap" id="tile0" data-tile="0" tabindex="0">
           <video id="video" muted autoplay playsinline></video>
-          <div id="tileLabel" class="tile-label"></div>
-          <div id="clock" class="clock">–</div>
-          <div id="modeBadge" class="badge" data-i18n="badge.connecting"></div>
+          <div id="tileLabel" class="tile-label"><span class="tile-dot" aria-hidden="true"></span><span id="tileName" class="tile-name"></span><span id="clock" class="clock">–</span></div>
+          <div id="modeBadge" class="badge" role="status" data-i18n="badge.connecting"></div>
           <div id="videoMsg" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
@@ -112,9 +111,8 @@
         </div>
         <div class="video-wrap hidden" id="tile1" data-tile="1" tabindex="0">
           <video id="video2" muted autoplay playsinline></video>
-          <div id="tileLabel2" class="tile-label"></div>
-          <div id="clock2" class="clock">–</div>
-          <div id="modeBadge2" class="badge" data-i18n="badge.connecting"></div>
+          <div id="tileLabel2" class="tile-label"><span class="tile-dot" aria-hidden="true"></span><span id="tileName2" class="tile-name"></span><span id="clock2" class="clock">–</span></div>
+          <div id="modeBadge2" class="badge" role="status" data-i18n="badge.connecting"></div>
           <div id="videoMsg2" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta2" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
@@ -146,9 +144,8 @@
         </div>
         <div class="video-wrap hidden" id="tile2" data-tile="2" tabindex="0">
           <video id="video3" muted autoplay playsinline></video>
-          <div id="tileLabel3" class="tile-label"></div>
-          <div id="clock3" class="clock">–</div>
-          <div id="modeBadge3" class="badge" data-i18n="badge.connecting"></div>
+          <div id="tileLabel3" class="tile-label"><span class="tile-dot" aria-hidden="true"></span><span id="tileName3" class="tile-name"></span><span id="clock3" class="clock">–</span></div>
+          <div id="modeBadge3" class="badge" role="status" data-i18n="badge.connecting"></div>
           <div id="videoMsg3" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta3" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
@@ -180,9 +177,8 @@
         </div>
         <div class="video-wrap hidden" id="tile3" data-tile="3" tabindex="0">
           <video id="video4" muted autoplay playsinline></video>
-          <div id="tileLabel4" class="tile-label"></div>
-          <div id="clock4" class="clock">–</div>
-          <div id="modeBadge4" class="badge" data-i18n="badge.connecting"></div>
+          <div id="tileLabel4" class="tile-label"><span class="tile-dot" aria-hidden="true"></span><span id="tileName4" class="tile-name"></span><span id="clock4" class="clock">–</span></div>
+          <div id="modeBadge4" class="badge" role="status" data-i18n="badge.connecting"></div>
           <div id="videoMsg4" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta4" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
@@ -214,9 +210,8 @@
         </div>
         <div class="video-wrap hidden" id="tile4" data-tile="4" tabindex="0">
           <video id="video5" muted autoplay playsinline></video>
-          <div id="tileLabel5" class="tile-label"></div>
-          <div id="clock5" class="clock">–</div>
-          <div id="modeBadge5" class="badge" data-i18n="badge.connecting"></div>
+          <div id="tileLabel5" class="tile-label"><span class="tile-dot" aria-hidden="true"></span><span id="tileName5" class="tile-name"></span><span id="clock5" class="clock">–</span></div>
+          <div id="modeBadge5" class="badge" role="status" data-i18n="badge.connecting"></div>
           <div id="videoMsg5" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta5" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
@@ -248,9 +243,8 @@
         </div>
         <div class="video-wrap hidden" id="tile5" data-tile="5" tabindex="0">
           <video id="video6" muted autoplay playsinline></video>
-          <div id="tileLabel6" class="tile-label"></div>
-          <div id="clock6" class="clock">–</div>
-          <div id="modeBadge6" class="badge" data-i18n="badge.connecting"></div>
+          <div id="tileLabel6" class="tile-label"><span class="tile-dot" aria-hidden="true"></span><span id="tileName6" class="tile-name"></span><span id="clock6" class="clock">–</span></div>
+          <div id="modeBadge6" class="badge" role="status" data-i18n="badge.connecting"></div>
           <div id="videoMsg6" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta6" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
@@ -463,7 +457,8 @@
       </section>
       <section class="setting">
         <div class="setting-title" data-i18n="settings.device">Gerät</div>
-        <div id="deviceName" class="muted"></div>
+        <span id="deviceName" hidden></span>
+        <dl id="deviceInfo" class="device-info"></dl>
       </section>
       <button id="btnHelp" class="row-button" type="button" aria-haspopup="dialog">
         <svg class="icon"><use href="#ic-help"/></svg><span data-i18n="help.title">Tastatur und Bedienung</span>

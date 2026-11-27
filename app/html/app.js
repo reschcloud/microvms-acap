@@ -49,6 +49,8 @@
     unassignedRecordings: [],
     exportChannels: new Map(),   // channel -> export checkbox
     exportBoxes: [],             // { channel, input }: export checkboxes beside the lanes
+    recordingNow: new Map(),     // channel -> the camera records it right now
+    device: {},                  // model, serial, firmware, hostname, ipv4[], ipv6[]
     selectMode: false,           // export mode: dragging the timeline selects a range
     theater: false,
     zoomReturn: null,            // saved multi-view state while a tile is zoomed to 1-up
@@ -594,9 +596,11 @@
       state.recordings = [];
       state.unassignedRecordings = [];
       draw();
-      refreshActiveRecording();
     }
-    if (tile.visible) refreshRecordings();
+    if (tile.visible) {
+      refreshRecordings();
+      refreshActiveRecording();   // every visible channel shows its own recording dot
+    }
   }
 
   /** Legacy entry point: change the channel of the active tile. */
@@ -724,7 +728,13 @@
   }
 
   async function listRecordings(from, to, { channel = state.channel, signal } = {}) {
-    if (to != null && to < from) return { recs: [], unknown: [], complete: true };
+    const { rows, complete } = await listRecordingRows(from, to, { signal });
+    return { ...selectChannel(rows, channel), complete };
+  }
+
+  /** All recordings in a range, every source (paged); the channel split is selectChannel's job. */
+  async function listRecordingRows(from, to, { signal } = {}) {
+    if (to != null && to < from) return { rows: [], complete: true };
     const p = new URLSearchParams({ starttime: isoUtc(from), sortorder: 'ascending', maxnumberofresults: String(PAGE_SIZE) });
     if (to != null) p.set('stoptime', isoUtc(to));
     const seen = new Map();
@@ -737,14 +747,13 @@
       const rows = parseRecordings(doc);
       const before = seen.size;
       for (const r of rows) seen.set(`${r.disk}/${r.id}`, r);
-      const selected = selectChannel([...seen.values()], channel);
       const raw = container?.getAttribute('numberofrecordings');
       const reported = raw && /^\d+$/.test(raw) ? Number(raw) : null;
       // Only ask for another page when this one was full and the camera reports more.
       const more = rows.length >= PAGE_SIZE && (reported == null || seen.size < reported);
-      if (!more) return { ...selected, complete: true };
+      if (!more) return { rows: [...seen.values()], complete: true };
       // A camera that ignores startatresultnumber must not blank the whole timeline.
-      if (seen.size === before || page + 1 >= MAX_PAGES) return { ...selected, complete: false };
+      if (seen.size === before || page + 1 >= MAX_PAGES) return { rows: [...seen.values()], complete: false };
     }
   }
 
@@ -1299,11 +1308,9 @@
   }
 
   function updateTileLabel(tile) {
-    const label = $(tileId(tile, 'tileLabel'));
     const empty = tile.channel == null;
     tile.el.classList.toggle('empty', empty);
-    label.textContent = empty ? t('tile.empty') : channelName(tile.channel);
-    label.classList.toggle('hidden', !multiChannel() && state.layoutSize === 1);
+    $(tileId(tile, 'tileName')).textContent = empty ? t('tile.empty') : channelName(tile.channel);
     const cta = $(tileId(tile, 'tileEmptyCta'));
     if (cta) cta.classList.toggle('hidden', !empty);
   }
@@ -1323,6 +1330,7 @@
     badge.className = `badge ${key}`;
     badge.textContent = t(`badge.${key}`);
     tile.el.setAttribute('data-state', key);
+    tile.el.classList.toggle('recording', key === 'live' && state.recordingNow.get(tile.channel) === true);
   }
 
   let audioUnlocked = false;
@@ -1422,6 +1430,7 @@
   let announcedMode;
   function updateModeUi(tile = activeTile()) {
     updateTileBadge(tile);
+    syncTimelineMode();
     if (tile !== activeTile()) return;
     const tiles = visibleTiles();
     const seeking = tile.pendingSeek != null;
@@ -1511,16 +1520,47 @@
         complete: data ? data.complete : true,
       };
     });
+    let shown = lanes;
     if (state.theater) {
       const active = activeTile().channel;
       const focused = lanes.filter((lane) => lane.channel === active);
-      if (focused.length) return focused;
+      if (focused.length) shown = focused;
     }
-    return lanes;
+    if (!timelineCompact()) return shown;
+    // Live: one slim lane with the footage of every visible channel.
+    return [{
+      channel: null,
+      name: '',
+      recs: shown.flatMap((lane) => lane.recs),
+      unknown: shown.flatMap((lane) => lane.unknown),
+      complete: shown.every((lane) => lane.complete),
+      sources: shown,
+    }];
   }
 
-  const laneGeometry = (index) => ({ y: LANE_TOP + index * LANE_HEIGHT, height: LANE_HEIGHT });
-  const timelineHeight = (lanes = timelineLanes()) => LANE_TOP + Math.max(1, lanes.length) * LANE_HEIGHT;
+  /**
+   * The timeline folds itself: collapsed while every tile is live, expanded in
+   * the archive (playback, pause, seek) and while exporting.
+   */
+  function timelineCompact() {
+    if (state.selectMode) return false;
+    const tiles = visibleTiles();
+    return tiles.every((tile) => tile.mode === 'live' && tile.pendingSeek == null);
+  }
+
+  let compactShown = null;
+  function syncTimelineMode() {
+    const compact = timelineCompact();
+    if (compact === compactShown) return;
+    compactShown = compact;
+    document.body?.classList?.toggle?.('timeline-compact', compact);
+    resizeCanvas();
+  }
+
+  const COMPACT_LANE = 20;
+  const laneHeight = () => (timelineCompact() ? COMPACT_LANE : LANE_HEIGHT);
+  const laneGeometry = (index) => ({ y: LANE_TOP + index * laneHeight(), height: laneHeight() });
+  const timelineHeight = (lanes = timelineLanes()) => LANE_TOP + Math.max(1, lanes.length) * laneHeight();
 
   function recordingPixels(rec) {
     const end = recStop(rec);
@@ -1617,6 +1657,7 @@
       syncSelectionInputs();
     }
     if (!on && selectionActive()) clearSelection();
+    syncTimelineMode();
     resizeCanvas();               // labels gain or lose their export checkboxes
   }
 
@@ -1628,22 +1669,24 @@
 
   function timelineRecordingAt(x, y, time) {
     const lanes = timelineLanes();
-    const index = Math.floor((y - LANE_TOP) / LANE_HEIGHT);
+    const laneH = laneHeight();
+    const index = Math.floor((y - LANE_TOP) / laneH);
     if (index < 0 || index >= lanes.length) return null;
     const lane = lanes[index];
-    const laneY = LANE_TOP + index * LANE_HEIGHT;
+    const laneY = LANE_TOP + index * laneH;
     const containsX = (r) => {
       const pixels = recordingPixels(r);
       return pixels && x >= pixels.left && x < pixels.left + pixels.width;
     };
-    // Ambiguous recordings sit as a thin gray strip at the bottom of the lane.
-    if (y >= laneY + LANE_HEIGHT - 5) {
-      const unknown = lane.unknown.find((r) => containsX(r) && r.start <= time && time < recStop(r));
-      if (unknown) return { channel: lane.channel, unknown: true };
+    const at = (r) => containsX(r) && r.start <= time && time < recStop(r);
+    // The collapsed lane merges every channel: look through each one.
+    for (const source of lane.sources || [lane]) {
+      // Ambiguous recordings sit as a thin gray strip at the bottom of the lane.
+      if (y >= laneY + laneH - 5 && source.unknown.some(at)) return { channel: source.channel, unknown: true };
+      const rec = source.recs.find((r) => r.type === 'triggered' && at(r));
+      if (rec) return { rec, channel: source.channel };
     }
-    const matches = lane.recs.filter((r) => r.type === 'triggered'
-      && containsX(r) && r.start <= time && time < recStop(r));
-    return matches.length ? { rec: matches[0], channel: lane.channel } : null;
+    return null;
   }
 
   function resizeCanvas() {
@@ -1696,19 +1739,21 @@
     }
     ctx.lineWidth = 1;
 
+    const laneH = laneHeight();
+    const inset = laneH > 24 ? 6 : 4;
     lanes.forEach((lane, index) => {
-      const y = LANE_TOP + index * LANE_HEIGHT;
+      const y = LANE_TOP + index * laneH;
       ctx.strokeStyle = COLORS.line;
       ctx.beginPath();
-      ctx.moveTo(0, y + LANE_HEIGHT - 0.5);
-      ctx.lineTo(W, y + LANE_HEIGHT - 0.5);
+      ctx.moveTo(0, y + laneH - 0.5);
+      ctx.lineTo(W, y + laneH - 0.5);
       ctx.stroke();
 
       const bar = (r, color) => {
         const pixels = recordingPixels(r);
         if (!pixels) return;
         ctx.fillStyle = color;
-        ctx.fillRect(pixels.left, y + 6, pixels.width, LANE_HEIGHT - 14);
+        ctx.fillRect(pixels.left, y + inset, pixels.width, laneH - 2 * inset - 2);
       };
       // Blue for every recording, then yellow for events so overlaps stay yellow.
       for (const r of lane.recs) if (r.type !== 'triggered') bar(r, COLORS.continuous);
@@ -1719,7 +1764,7 @@
         const x2 = Math.min(W, xOf(recStop(r)));
         if (x2 <= x1) continue;
         ctx.fillStyle = COLORS.text;
-        ctx.fillRect(x1, y + LANE_HEIGHT - 4, Math.max(1, x2 - x1), 2);
+        ctx.fillRect(x1, y + laneH - 4, Math.max(1, x2 - x1), 2);
       }
     });
 
@@ -1800,14 +1845,14 @@
     if (!background) timelineStatus(t('tl.loading'));
     const from = viewStart - margin;
     const to = Math.min(viewEnd + margin, Date.now());
-    // One request per visible channel; a failing channel does not blank the others.
-    const results = await Promise.all(channels.map(async (channel) => {
-      try {
-        return { channel, ...(await listRecordings(from, to, { channel, signal: request.signal })) };
-      } catch (e) {
-        return { channel, error: e };
-      }
-    }));
+    // The camera lists every source in one answer: one request, split per channel.
+    let results;
+    try {
+      const { rows, complete } = await listRecordingRows(from, to, { signal: request.signal });
+      results = channels.map((channel) => ({ channel, ...selectChannel(rows, channel), complete }));
+    } catch (e) {
+      results = channels.map((channel) => ({ channel, error: e }));
+    }
     if (request.signal.aborted) return;
     const map = new Map();
     let failed = null;
@@ -2299,8 +2344,73 @@
       });
       const j = await res.json();
       const p = (j.data && j.data.propertyList) || {};
+      // deviceName also titles merged exports.
       $('deviceName').textContent = [p.ProdShortName || p.ProdNbr, p.SerialNumber].filter(Boolean).join(' · ');
+      Object.assign(state.device, {
+        model: p.ProdFullName || p.ProdShortName || p.ProdNbr || '',
+        serial: p.SerialNumber || '',
+        firmware: p.Version || '',
+      });
     } catch (e) { /* optional */ }
+    renderDeviceInfo();
+    await loadNetworkInfo();
+  }
+
+  const unique = (list) => [...new Set(list.filter(Boolean))];
+
+  /**
+   * Addresses for the settings sheet. The network API may need operator rights;
+   * then the Network parameters, and at least the address this browser uses.
+   */
+  async function loadNetworkInfo() {
+    let ipv4 = [], ipv6 = [], hostname = '';
+    try {
+      const res = await fetch('/axis-cgi/network_settings.cgi', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiVersion: '1.0', method: 'getNetworkInfo' }),
+      });
+      if (res.ok) {
+        const data = (await res.json())?.data || {};
+        hostname = data.system?.hostname?.hostname || '';
+        for (const device of data.devices || []) {
+          ipv4.push(...(device.IPv4?.addresses || []).map((a) => a.address));
+          ipv6.push(...(device.IPv6?.addresses || []).map((a) => a.address));
+        }
+      }
+    } catch (e) { /* try the parameters */ }
+    if (!ipv4.length && !ipv6.length) {
+      try {
+        const p = await fetchParams('Network');
+        ipv4.push(p['root.Network.eth0.IPAddress'] || p['root.Network.IPAddress']);
+        ipv6.push(...(p['root.Network.eth0.IPv6.IPAddresses'] || '').split(/[\s,]+/));
+        hostname = hostname || p['root.Network.HostName'] || '';
+      } catch (e) { /* not readable for this user */ }
+    }
+    const host = (typeof location !== 'undefined' && location.hostname) || '';
+    if (!ipv4.length && /^\d+\.\d+\.\d+\.\d+$/.test(host)) ipv4.push(host);
+    if (!ipv6.filter(Boolean).length && host.includes(':')) ipv6.push(host.replace(/^\[|\]$/g, ''));
+    Object.assign(state.device, { ipv4: unique(ipv4), ipv6: unique(ipv6), hostname });
+    renderDeviceInfo();
+  }
+
+  function renderDeviceInfo() {
+    const d = state.device;
+    const box = $('deviceInfo');
+    box.replaceChildren();
+    for (const [key, value] of [
+      ['device.model', d.model], ['device.serial', d.serial], ['device.firmware', d.firmware],
+      ['device.hostname', d.hostname], ['device.ipv4', d.ipv4?.join('\n')], ['device.ipv6', d.ipv6?.join('\n')],
+    ]) {
+      if (!value) continue;
+      const term = document.createElement('dt');
+      term.textContent = t(key);
+      const detail = document.createElement('dd');
+      detail.textContent = value;
+      box.appendChild(term);
+      box.appendChild(detail);
+    }
   }
 
   function renderStorageMeter() {
@@ -2390,24 +2500,30 @@
     const request = new AbortController();
     activeRequest = request;
     const channel = state.channel;
-    if (channel == null) {
-      activeRecording = { channel: null, ongoing: [], unknown: false };
-      updateRecordingIndicator();
-      return;
-    }
-    if (activeRecording?.channel !== channel) activeRecording = undefined;
+    // The active channel feeds the status chip; every visible channel gets its tile dot.
+    const channels = [...new Set([channel, ...timelineChannels()].filter((c) => c != null))];
+    if (channel == null) activeRecording = { channel: null, ongoing: [], unknown: false };
+    else if (activeRecording?.channel !== channel) activeRecording = undefined;
     updateRecordingIndicator();
+    if (!channels.length) return;
     try {
       const now = Date.now();
-      const result = await listRecordings(now - 5 * MIN, now, { channel, signal: request.signal });
+      const { rows } = await listRecordingRows(now - 5 * MIN, now, { signal: request.signal });
       if (request.signal.aborted) return;
       const ongoing = (r) => r.status === 'recording' && (!r.stop || r.stop > now - MIN);
-      activeRecording = { channel, ongoing: result.recs.filter(ongoing), unknown: result.unknown.some(ongoing) };
+      for (const c of channels) {
+        const { recs, unknown } = selectChannel(rows, c);
+        const running = recs.filter(ongoing);
+        state.recordingNow.set(c, running.length > 0);
+        if (c === channel) activeRecording = { channel, ongoing: running, unknown: unknown.some(ongoing) };
+      }
     } catch (e) {
       if (request.signal.aborted) return;
-      activeRecording = { channel, ongoing: [], unknown: true };
+      channels.forEach((c) => state.recordingNow.delete(c));
+      if (channel != null) activeRecording = { channel, ongoing: [], unknown: true };
     }
     updateRecordingIndicator();
+    updateAllTileUi();
   }
 
   function updateRecordingIndicator() {
@@ -2461,6 +2577,7 @@
     applyLayout();
     restoreSharedTime(shared);
     refreshRecordings();
+    refreshActiveRecording();
   }
 
   $('layoutSelect').addEventListener('change', (ev) => setLayout(ev.target.value));
