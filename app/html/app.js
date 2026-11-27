@@ -51,6 +51,7 @@
     exportBoxes: [],             // { channel, input }: export checkboxes beside the lanes
     recordingNow: new Map(),     // channel -> the camera records it right now
     device: {},                  // model, serial, firmware, hostname, ipv4[], ipv6[]
+    scrubTime: null,             // playhead position while it is dragged
     selectMode: false,           // export mode: dragging the timeline selects a range
     theater: false,
     zoomReturn: null,            // saved multi-view state while a tile is zoomed to 1-up
@@ -554,6 +555,10 @@
       restartTileIfLive(tile);
     });
 
+    $(tileId(tile, 'tileSnapshot')).addEventListener('click', (ev) => {
+      ev?.stopPropagation?.();
+      takeSnapshot(tile);
+    });
     const audioBtn = $(tileId(tile, 'tileAudio'));
     audioBtn.addEventListener('click', () => setTileAudio(tile, !tile.audio));
     const emptyCta = $(tileId(tile, 'tileEmptyCta'));
@@ -1338,6 +1343,14 @@
     badge.textContent = t(`badge.${key}`);
     tile.el.setAttribute('data-state', key);
     tile.el.classList.toggle('recording', key === 'live' && state.recordingNow.get(tile.channel) === true);
+    $(tileId(tile, 'tileSnapshot')).disabled = !canSnapshot(tile);
+  }
+
+  /** A picture to save: running live/playback video or a held frame. */
+  function canSnapshot(tile) {
+    const playing = tile.streamStatus === 'playing' && tile.pendingSeek == null;
+    return tile.channel != null
+      && ((playing && (tile.mode === 'live' || tile.mode === 'playback')) || tile.lastFrame != null);
   }
 
   let audioUnlocked = false;
@@ -1450,16 +1463,13 @@
     $('manualSourceInfo').classList.toggle('hidden', !tile.manualRecording);
     $('pauseIcon').setAttribute('href', allPaused ? '#ic-play' : '#ic-pause');
     $('btnFwd').disabled = allLive;
-    const canSnapshot = tile.channel != null
-      && ((live && playing) || (tile.mode === 'playback' && playing) || tile.lastFrame != null);
-    $('btnSnapshot').disabled = !canSnapshot;
     $('btnRetryPlayback').classList.toggle('hidden', seeking || tile.mode !== 'playback' || tile.streamStatus !== 'error');
-    const lb = $('btnLive');
-    // Only offer the button when it can do something: leave playback or retry live video.
-    const hideLive = allLive && allPlaying;
-    lb.disabled = false;
-    lb.classList.toggle('hidden', hideLive);
-    $('liveLabel').textContent = allLive ? t(allPlaying ? 'live.btn' : 'live.retry') : t('live.back');
+    // Live | Archive switch: a second click on Live retries a stalled live stream.
+    for (const [id, on] of [['btnLive', allLive], ['btnArchive', !allLive]]) {
+      $(id).classList.toggle('active', on);
+      $(id).setAttribute('aria-pressed', String(on));
+    }
+    $('btnLive').title = allLive && !allPlaying ? t('live.retry') : '';
     const mode = live && !playing ? tile.streamStatus : seeking ? 'seeking' : tile.mode;
     if (mode !== announcedMode) {
       announcedMode = mode;
@@ -1563,7 +1573,14 @@
     if (compact === compactShown) return;
     compactShown = compact;
     document.body?.classList?.toggle?.('timeline-compact', compact);
+    if (compact) showToday();
     resizeCanvas();
+  }
+
+  /** Live view shows today; also after midnight. */
+  function showToday() {
+    const today = startOfDay(Date.now());
+    if (state.viewStart !== today || state.viewEnd !== shiftDay(today, 1)) showDay(today);
   }
 
   const COMPACT_LANE = 20;
@@ -1713,6 +1730,9 @@
 
   const EDGE_GAP = 6;
 
+  /** Time under the playhead: the shared clock, also for a tile waiting for footage. */
+  const playheadTime = () => (activeTile().waitingFor ? sharedClockTime() : currentWall());
+
   /** Darkness of the local night: 0 at 14:00, 1 at 02:00 (smooth cosine). */
   function nightness(ms) {
     const d = new Date(ms);
@@ -1821,7 +1841,7 @@
       ctx.fillRect(x1, H - 2, x2 - x1, 2);
     }
 
-    const xp = xOf(activeTile().waitingFor ? sharedClockTime() : currentWall());
+    const xp = xOf(state.scrubTime ?? playheadTime());
     if (xp >= 0 && xp <= W) {
       ctx.strokeStyle = state.mode === 'live' ? COLORS.live : COLORS.accent;
       ctx.lineWidth = 2;
@@ -1990,20 +2010,30 @@
     draw();
   }
 
-  const FRAME_CURSORS = { start: 'ew-resize', end: 'ew-resize', move: 'move' };
+  const FRAME_CURSORS = { start: 'ew-resize', end: 'ew-resize', move: 'move', playhead: 'col-resize' };
+
+  const playheadHit = (x) => Math.abs(x - xOf(playheadTime())) <= EDGE_PX;
+
+  /** What a press at x grabs: export frame edge, the playhead, the frame body, or the view. */
+  function grabAt(x) {
+    const part = frameHit(x);
+    if (part === 'start' || part === 'end') return part;
+    if (playheadHit(x)) return 'playhead';
+    if (part) return part;
+    return timelineCompact() ? 'none' : 'pan';     // the live strip stays on today
+  }
 
   canvas.addEventListener('pointerdown', (ev) => {
     if (!ev.isPrimary || ev.button !== 0) return;
     canvas.setPointerCapture(ev.pointerId);
-    const part = frameHit(ev.offsetX);
     drag = {
       id: ev.pointerId, x0: ev.offsetX, view0: [state.viewStart, state.viewEnd],
-      moved: false, mode: part || 'pan',
+      moved: false, mode: grabAt(ev.offsetX),
       frame0: [Math.min(state.selStart, state.selEnd), Math.max(state.selStart, state.selEnd)],
     };
   });
   canvas.addEventListener('pointermove', (ev) => {
-    if (!drag) canvas.style.cursor = FRAME_CURSORS[frameHit(ev.offsetX)] || 'grab';
+    if (!drag) canvas.style.cursor = FRAME_CURSORS[grabAt(ev.offsetX)] || (timelineCompact() ? 'pointer' : 'grab');
     const tip = $('tlTooltip');
     const at = tOf(ev.offsetX);
     tip.textContent = `${fmtDateTime(at)} ${fmtOffset(at)}`;
@@ -2015,7 +2045,10 @@
     if (!drag.moved) return;
     const dt = (dx / canvasWidth()) * (drag.view0[1] - drag.view0[0]);
     if (drag.mode === 'pan') setView(drag.view0[0] - dt, drag.view0[1] - dt);
-    else editFrame(drag.mode, drag.frame0, dt);
+    else if (drag.mode === 'playhead') {
+      state.scrubTime = Math.min(Math.round(tOf(ev.offsetX)), Date.now());
+      draw();
+    } else if (drag.mode !== 'none') editFrame(drag.mode, drag.frame0, dt);
   });
   function tileForChannel(channel) {
     return visibleTiles().find((tile) => tile.channel === channel) || activeTile();
@@ -2025,6 +2058,13 @@
     if (drag?.id !== ev.pointerId) return;
     const d = drag;
     drag = null;
+    if (d.mode === 'playhead' && state.scrubTime != null) {
+      // Seek once on release; close to now this is live again.
+      const time = state.scrubTime;
+      state.scrubTime = null;
+      playAtAll(time);
+      return;
+    }
     if (d.moved) return;
     const time = Math.round(tOf(ev.offsetX));
     const hit = timelineRecordingAt(ev.offsetX, ev.offsetY, time);
@@ -2046,10 +2086,13 @@
   for (const type of ['pointercancel', 'lostpointercapture']) canvas.addEventListener(type, (ev) => {
     if (drag?.id !== ev.pointerId) return;
     drag = null;
+    state.scrubTime = null;
+    draw();
   });
   canvas.addEventListener('pointerleave', () => $('tlTooltip').classList.add('hidden'));
   canvas.addEventListener('wheel', (ev) => {
     ev.preventDefault();
+    if (timelineCompact()) return;            // the live strip stays on today
     zoom(ev.deltaY > 0 ? 1.25 : 0.8, tOf(ev.offsetX));
   }, { passive: false });
 
@@ -2358,6 +2401,18 @@
     return Math.max(0, Math.round(nowMs() - start));
   }
 
+  /**
+   * Which IP version the page uses. Only an address in the URL tells; for a host
+   * name the browser picks IPv4 or IPv6 internally and does not reveal it.
+   */
+  function connectionVia(host = (typeof location !== 'undefined' && location.hostname) || '') {
+    const bare = host.replace(/^\[|\]$/g, '');
+    if (!bare) return '';
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(bare)) return t('net.via4', { host: bare });
+    if (bare.includes(':')) return t('net.via6', { host: bare });
+    return t('net.viaName', { host: bare });
+  }
+
   async function updatePing() {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     const el = $('netPing');
@@ -2556,18 +2611,17 @@
 
   // ------------------------------------------------------------ Wiring
 
-  $('btnLive').addEventListener('click', () => {
-    goLiveAll();
-    const now = Date.now();
-    if (now < state.viewStart || now > state.viewEnd) showDay(startOfDay(now));
+  $('btnLive').addEventListener('click', goLiveAll);
+  // Archive from live: play from one minute ago; the timeline unfolds for scrubbing.
+  $('btnArchive').addEventListener('click', () => {
+    if (sharedTime().live) playAtAll(Date.now() - MIN);
   });
   $('btnPause').addEventListener('click', togglePauseAll);
   $('btnBack').addEventListener('click', () => skipBackAll(SKIP));
   $('btnBack5').addEventListener('click', () => skipBackAll(SKIP_SHORT));
   $('btnFwd').addEventListener('click', () => skipForwardAll(SKIP));
   $('btnRetryPlayback').addEventListener('click', retryPlaybackAll);
-  function takeSnapshot() {
-    const tile = activeTile();
+  function takeSnapshot(tile = activeTile()) {
     if (tile.channel == null) return;
     if (tile.mode === 'live' && tile.pendingSeek == null && tile.streamStatus === 'playing') {
       const p = new URLSearchParams({ camera: String(tile.channel) });
@@ -2579,7 +2633,6 @@
     snapshotFromTile(tile);
   }
 
-  $('btnSnapshot').addEventListener('click', takeSnapshot);
   function setLayout(value) {
     // The current layout again: nothing to do (no reconnect, no lost pause).
     if (String(value) === String(state.layout) && !state.zoomReturn) return;
@@ -2710,8 +2763,8 @@
   // ------------------------------------------------------------ Shortcuts
 
   const SHORTCUT_TIPS = {
-    btnPause: 'Space', btnLive: 'L', btnBack: 'Shift+←', btnBack5: '←',
-    btnFwd: '→', btnSnapshot: 'S', btnHelp: '?',
+    btnPause: 'K / Space', btnBack: 'Shift+J', btnBack5: 'J / ←',
+    btnFwd: 'Shift+L', btnHelp: '?',
   };
 
   function resolveShortcut(ev, context = {}) {
@@ -2721,7 +2774,10 @@
     if (key === ' ') return 'pause';
     if (key === 'Escape') return 'escape';
     if (key === '?' || (key === '/' && ev.shiftKey)) return 'help';
-    if (key === 'l' || key === 'L') return 'live';
+    // J / K / L as in video editors: back, pause, forward (Shift: 30 s).
+    if (key === 'j' || key === 'J') return ev.shiftKey ? 'back30' : 'back5';
+    if (key === 'k' || key === 'K') return 'pause';
+    if (key === 'l' || key === 'L') return ev.shiftKey ? 'forward30' : 'forward5';
     if (key === 'f' || key === 'F') return 'theater';
     if (key === 's' || key === 'S') return 'snapshot';
     if (key === 'e' || key === 'E') return context.exporting ? null : 'export';
@@ -2763,7 +2819,6 @@
     resetTheaterIdle();
     switch (action) {
       case 'pause': togglePauseAll(); break;
-      case 'live': goLiveAll(); break;
       case 'back5': skipBackAll(SKIP_SHORT); break;
       case 'back30': skipBackAll(SKIP); break;
       case 'forward5': skipForwardAll(SKIP_SHORT); break;
@@ -2868,6 +2923,7 @@
       }
     }
     followSharedClock();
+    if (compactShown) showToday();
     if (!drag) draw();
   }, 250);
 
@@ -2875,6 +2931,7 @@
   document.addEventListener?.('visibilitychange', () => {
     if (document.visibilityState !== 'hidden') updatePing();
   });
+  $('netVia').textContent = connectionVia();
   setInterval(updateBandwidth, 1000);
   setInterval(updatePing, 5000);
   for (const tile of state.tiles) wireTile(tile);
@@ -2916,9 +2973,8 @@
     const session = readSessionSnapshot();
     loadLayoutPreference();
     if (session && ['auto', '1', '2', '4', '6'].includes(session.layout)) state.layout = session.layout;
-    const viewStart = Number.isFinite(session?.viewStart) ? session.viewStart : now - 2 * HOUR;
-    const viewEnd = Number.isFinite(session?.viewEnd) ? session.viewEnd : now + 30 * MIN;
-    setView(viewStart, viewEnd, { fetch: false });
+    // The app opens on today (the live view always shows today).
+    setView(startOfDay(now), shiftDay(startOfDay(now), 1), { fetch: false });
     resizeCanvas();
     updateModeUi();
     updateBandwidth();

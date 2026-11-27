@@ -37,13 +37,22 @@ UI, in the style of a car dashboard:
 - **The timeline folds itself:** one slim merged strip while every tile is live,
   the full lanes with toolbar in the archive (playback, pause, seek) and while
   exporting. A click into the strip enters the archive.
-  Its background darkens smoothly towards the local night (darkest 02:00,
+  Its background turns a quiet dark blue towards the local night (darkest 02:00,
   lightest 14:00); day lines are kept but never drawn on the rounded border.
 - **Device details** in the settings: model, serial, firmware, host name, IPv4
-  and IPv6 (network API, else Network parameters, else the browser's address). Empty slots are a themed placeholder with
+  and IPv6 (network API, else Network parameters, else the browser's address).
+  The connection shows IPv4 or IPv6 only when the URL names an address; for a
+  host name the browser does not reveal it. Hop counts are not available to a
+  web page (no traceroute, no TTL), so they are not shown. Empty slots are a themed placeholder with
   "Choose channel". Overlays on video stay dark in both themes.
 - **Transport:** play/pause sits between two equal halves, so it is always
-  exactly centered under the tiles. The Live button always reads "Live".
+  exactly centered under the tiles. A Live | Archive switch (styled like the
+  layout switch) replaces the live button; Archive from live plays from one
+  minute ago. Keys: J/K/L back/pause/forward (Shift: 30 s), arrows as J/L.
+- **Snapshots** come from a camera icon in each tile, for exactly that tile.
+- **Playhead:** it can be dragged; only the marker moves while dragging and the
+  seek happens once on release (near now this is live again). The live strip
+  always shows today and cannot be panned or zoomed; the app opens on today.
 - **Export is a mode.** Outside it, dragging the timeline only pans; no range
   can be drawn. "Export" opens a yellow frame from one minute before to one
   minute after the playhead (never past now) and zooms the view to ±5 min; the

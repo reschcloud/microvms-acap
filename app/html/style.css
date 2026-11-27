@@ -34,8 +34,8 @@
 
 :root,
 :root[data-theme="dark"] {
-  --tl-night-rgb: 0, 0, 0;
-  --tl-night-alpha: .6;
+  --tl-night-rgb: 25, 55, 150;
+  --tl-night-alpha: .4;
   color-scheme: dark;
   --bg: #111214;
   --surface: #1b1c1f;
@@ -57,8 +57,8 @@
 }
 
 :root[data-theme="light"] {
-  --tl-night-rgb: 20, 30, 60;
-  --tl-night-alpha: .14;
+  --tl-night-rgb: 40, 80, 190;
+  --tl-night-alpha: .16;
   color-scheme: light;
   --bg: #f4f4f4;
   --surface: #ffffff;
@@ -465,9 +465,8 @@ button.tile-icon.audio-on { background: var(--accent); }
 .round.main:hover { background: var(--muted); }
 .round.main .icon { width: 26px; height: 26px; }
 
-.live-btn { background: var(--live); color: #fff; }
-.live-btn:hover { background: #c81b20; }
-.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #fff; }
+.mode-seg button { gap: 8px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--live); }
 
 #sourceChoices { margin-top: var(--gap); max-height: 14rem; overflow: auto; flex: none; }
 .choice-list { display: flex; flex-direction: column; gap: 6px; }
@@ -721,7 +720,10 @@ body.theater .controls {
   transition: opacity var(--dur) var(--ease);
 }
 body.theater .round.main { background: #fff; color: #000; }
-body.theater .pill:not(.live-btn) { background: rgba(255, 255, 255, .14); color: #fff; }
+body.theater .pill { background: rgba(255, 255, 255, .14); color: #fff; }
+body.theater .segmented { background: rgba(255, 255, 255, .14); }
+body.theater .segmented button { color: rgba(255, 255, 255, .7); }
+body.theater .segmented button.active { background: rgba(255, 255, 255, .9); color: #000; }
 body.theater.theater-idle .controls { opacity: 0; pointer-events: none; }
 body.theater #sourceChoices,
 body.theater #manualSourceInfo,
@@ -758,8 +760,7 @@ body.theater .ptz-layer { display: none !important; }
     background: var(--surface);
     box-shadow: 0 -8px 32px rgba(0, 0, 0, .2);
   }
-  .controls .pill span:not(.live-dot) { display: none; }   /* icon only on phones */
-  #btnLive #liveLabel, #btnRetryPlayback { display: inline; }
+  .mode-seg button { min-width: 0; padding: 0 10px; }
   .transport, .transport-half { gap: 4px; }
   .round { width: 44px; height: 44px; }
   .round.main { width: 52px; height: 52px; }

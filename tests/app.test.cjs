@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness,
+    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness, connectionVia,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -355,6 +355,11 @@ test('shortcut resolution and theater mode follow the desktop rules', async () =
   assert.equal(app.resolveShortcut({ key: '?' , shiftKey: true }, {}), 'help');
   assert.equal(app.resolveShortcut({ key: '1' }, { typing: true }), null);
   assert.equal(app.resolveShortcut({ key: 'f' }, {}), 'theater');
+  assert.equal(app.resolveShortcut({ key: 'j' }, {}), 'back5');
+  assert.equal(app.resolveShortcut({ key: 'J', shiftKey: true }, {}), 'back30');
+  assert.equal(app.resolveShortcut({ key: 'k' }, {}), 'pause');
+  assert.equal(app.resolveShortcut({ key: 'l' }, {}), 'forward5');
+  assert.equal(app.resolveShortcut({ key: 'L', shiftKey: true }, {}), 'forward30');
 
   app.state.channelCount = 2;
   app.state.tiles[1].channel = 2;
@@ -434,7 +439,7 @@ test('export opens a frame of one minute around the playhead that can be resized
   assert.equal(app.state.selEnd, T + 90000);
   drag(x(T - 60000), x(T - 60000) - px(10000));  // start edge: -10 s
   assert.equal(app.state.selStart, T - 70000);
-  drag(x(T), x(T) + px(20000));                  // body: both +20 s
+  drag(x(T) + px(30000), x(T) + px(50000));      // body (away from the playhead): both +20 s
   assert.deepEqual([app.state.selStart, app.state.selEnd], [T - 50000, T + 110000]);
 
   // A click outside the frame seeks but keeps the frame.
@@ -736,14 +741,18 @@ test('the layout selector switches 1/2/4/6 and keeps the first six channels', as
   assert.equal(app.state.tiles[5].channel, 6);
 });
 
-test('snapshot uses the live JPEG endpoint and playback frames without a live JPEG', async () => {
+test('each tile saves its own picture: live JPEG endpoint, playback and paused frames', async () => {
   const app = await browser();
+  const camera = app.element('tileSnapshot');
   assert.match(app.element('modeBadge').textContent, /connecting/);
+  assert.equal(camera.disabled, true, 'no picture yet');
   app.element('video').events.playing();
   assert.equal(app.element('modeBadge').textContent, 'badge.live');
-  // While live video plays there is nothing for the live button to do.
-  assert.equal(app.element('btnLive').classList.contains('hidden'), true);
-  app.element('btnSnapshot').events.click();
+  // The Live | Archive switch shows where we are.
+  assert.equal(app.element('btnLive').classList.contains('active'), true);
+  assert.equal(app.element('btnArchive').classList.contains('active'), false);
+  assert.equal(camera.disabled, false);
+  camera.events.click({ stopPropagation() {} });
   assert.match(app.downloads[0], /\/axis-cgi\/jpg\/image.cgi/);
 
   app.state.tiles[0].video.videoWidth = 640;
@@ -751,22 +760,24 @@ test('snapshot uses the live JPEG endpoint and playback frames without a live JP
   app.route(() => recordings(1, recording('clip')));
   await app.playAt(fixtureTime + 1000);
   app.element('video').events.playing();
-  assert.equal(app.element('btnLive').classList.contains('hidden'), false);
-  assert.equal(app.element('btnSnapshot').disabled, false);
-  app.element('btnSnapshot').events.click();
+  assert.equal(app.element('btnLive').classList.contains('active'), false);
+  assert.equal(app.element('btnArchive').classList.contains('active'), true);
+  assert.equal(camera.disabled, false);
+  camera.events.click({ stopPropagation() {} });
   assert.equal(app.downloads.length, 2);
   assert.match(app.downloads[1], /^data:image\/jpeg/);
 
   const paused = app.element('btnPause');
   paused.events.click();
-  assert.equal(app.element('btnSnapshot').disabled, false);
-  app.element('btnSnapshot').events.click();
+  assert.equal(camera.disabled, false);
+  camera.events.click({ stopPropagation() {} });
   assert.equal(app.downloads.length, 3);
   assert.match(app.downloads[2], /^data:image\/jpeg/);
 });
 
 test('outside the export mode a drag in the timeline only pans', async () => {
   const app = await browser();
+  app.element('btnPause').events.click();          // archive: the timeline unfolds
   app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
   const canvas = app.element('timeline');
   for (const offsetY of [5, 40]) {       // time ruler and lane
@@ -1370,4 +1381,53 @@ test('the timeline background is darkest at night and lightest in the afternoon'
   assert.ok(app.nightness(at(6)) > app.nightness(at(10)));
   const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
   assert.doesNotMatch(html, /statusChip|recordingIndicator/, 'no redundant recording chip in the top bar');
+});
+
+test('dragging the playhead scrubs and seeks once on release', async () => {
+  const app = await browser();
+  const T = fixtureTime + 120000;
+  app.route(() => recordings(1, recording('clip', fixtureTime, fixtureTime + 600000)));
+  await app.playAt(T);
+  app.setView(fixtureTime, fixtureTime + 400000, { fetch: false });   // 500 ms per pixel
+  const canvas = app.element('timeline');
+  const xT = (T - fixtureTime) / 500;
+  app.requests.length = 0;
+  canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: xT, offsetY: 40 });
+  canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: xT + 120, offsetY: 40 });
+  assert.equal(app.state.scrubTime, T + 60000);
+  assert.deepEqual([app.state.viewStart, app.state.viewEnd], [fixtureTime, fixtureTime + 400000], 'no panning');
+  assert.equal(app.requests.length, 0, 'no lookup while dragging');
+  canvas.events.pointerup({ isPrimary: true, button: 0, pointerId: 1, offsetX: xT + 120, offsetY: 40 });
+  await ticks();
+  assert.equal(app.state.scrubTime, null);
+  assert.equal(app.state.startWall, T + 60000);
+});
+
+test('the live strip stays on today and the archive switch leaves live', async () => {
+  const app = await browser();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  // The app opens on today.
+  assert.equal(app.state.viewStart, today.getTime());
+  const canvas = app.element('timeline');
+  canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: 100, offsetY: 40 });
+  canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: 300, offsetY: 40 });
+  canvas.events.pointerup({ isPrimary: true, button: 0, pointerId: 1, offsetX: 300, offsetY: 40 });
+  assert.equal(app.state.viewStart, today.getTime(), 'live view is not panned');
+
+  app.route(() => recordings(1, recording('recent', Date.now() - 3600000, Date.now() - 1000)));
+  app.element('btnArchive').events.click();
+  await ticks();
+  assert.equal(app.state.mode, 'playback');
+  assert.ok(Math.abs(app.state.startWall - (Date.now() - 60000)) < 5000);
+  app.element('btnLive').events.click();
+  assert.equal(app.state.mode, 'live');
+});
+
+test('the connection shows the IP version when the URL names an address', async () => {
+  const app = await browser();
+  assert.equal(app.connectionVia('192.168.1.20'), 'net.via4 {"host":"192.168.1.20"}');
+  assert.equal(app.connectionVia('[2001:db8::20]'), 'net.via6 {"host":"2001:db8::20"}');
+  assert.equal(app.connectionVia('kamera.local'), 'net.viaName {"host":"kamera.local"}');
+  assert.equal(app.connectionVia(''), '');
 });
