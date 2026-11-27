@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    refreshActiveRecording, doExport, loadChannels,
+    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -40,8 +40,9 @@ function deferred() {
   return { resolve, response };
 }
 
-async function browser() {
+async function browser({ route: startRoute, session } = {}) {
   const nodes = new Map(), requests = [], messages = [], downloads = [];
+  const local = new Map();
   const rectangles = [];
   const canvasContext = new Proxy({}, { get: (ctx, key) => ctx[key] ?? (() => {}) });
   canvasContext.fillRect = (x, y, w, h) => rectangles.push({ x, y, w, h, color: canvasContext.fillStyle });
@@ -69,6 +70,7 @@ async function browser() {
   // A real addEventListener: optional chaining must not hide undefined handlers.
   const docEvents = {};
   const doc = {
+    documentElement: { dataset: {} },
     getElementById: element, querySelectorAll: () => [], dispatchEvent() {},
     addEventListener(type, fn) { (docEvents[type] ||= []).push(fn); },
     events: docEvents,
@@ -81,9 +83,11 @@ async function browser() {
     if (url.pathname.endsWith('/disks/list.cgi')) return listDisks();
     return '';
   };
-  let handler = defaults;
+  let handler = startRoute ? (url, opts) => startRoute(url, opts) ?? defaults(url) : defaults;
   const context = {
     document: doc, Date, URLSearchParams, AbortController, AbortSignal,
+    localStorage: { getItem: (k) => (local.has(k) ? local.get(k) : null), setItem: (k, v) => local.set(k, String(v)) },
+    sessionStorage: { getItem: () => (session ? JSON.stringify(session) : null), setItem() {} },
     DOMParser: class { parseFromString(data) { return data; } }, CustomEvent: class {},
     fetch: async (href, opts) => {
       const url = new URL(href, 'https://camera.invalid');
@@ -104,7 +108,7 @@ async function browser() {
   vm.runInNewContext(source, context);
   await tick();
   requests.length = 0;
-  return { ...context.testApp, element, requests, messages, downloads, rectangles,
+  return { ...context.testApp, element, requests, messages, downloads, rectangles, local, win: context,
     route(fn) { handler = (url, opts) => fn(url, opts) ?? defaults(url); },
     options(value) { options = value; },
   };
@@ -304,19 +308,22 @@ test('recordings expose audio tracks and control the export audio option', async
   assert.equal(app.element('expAudioHint').classList.contains('hidden'), false);
 });
 
-test('the tools sidebar is the only status surface and opens from the topbar', async () => {
+test('the settings sheet holds the secondary status and opens from the topbar', async () => {
   const app = await browser();
   const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
   assert.ok(html.includes('id="layoutSeg"'));
   assert.ok(html.includes('id="btnInspector"'));
   assert.equal(html.includes('id="appMenu"'), false);
-  assert.equal(app.element('inspector').classList.contains('open'), true); // default open
-  assert.ok(html.indexOf('id="netStatus"') > html.indexOf('id="inspector"'));
-  assert.ok(html.indexOf('id="netStatus"') < html.indexOf('id="storageStatus"'));
-  app.element('btnInspectorClose').events.click();
+  // Secondary information is out of the way until asked for.
   assert.equal(app.element('inspector').classList.contains('open'), false);
+  for (const id of ['netStatus', 'storageStatus', 'deviceName', 'themeSeg', 'btnHelp']) {
+    assert.ok(html.indexOf(`id="${id}"`) > html.indexOf('id="inspector"'), id);
+  }
   app.element('btnInspector').events.click();
   assert.equal(app.element('inspector').classList.contains('open'), true);
+  assert.equal(app.local.get('minivms.inspector'), '1');
+  app.element('btnInspectorClose').events.click();
+  assert.equal(app.element('inspector').classList.contains('open'), false);
 });
 
 test('the storage meter visualizes usage and shows an encrypted lock', async () => {
@@ -679,7 +686,6 @@ test('snapshot uses the live JPEG endpoint and playback frames without a live JP
   assert.equal(app.element('modeBadge').textContent, 'badge.live');
   // While live video plays there is nothing for the live button to do.
   assert.equal(app.element('btnLive').classList.contains('hidden'), true);
-  assert.equal(app.element('liveSep').classList.contains('hidden'), true);
   app.element('btnSnapshot').events.click();
   assert.match(app.downloads[0], /\/axis-cgi\/jpg\/image.cgi/);
 
@@ -940,3 +946,201 @@ test('a viewer can see active recording even without access to the disk list', a
   assert.match(app.element('recordingIndicator').textContent, /rec.activeDisk/);
 });
 
+
+// ---------------------------------------------------------------- Regressions (review 2026-11-27)
+
+const ticks = async (n = 10) => { for (let i = 0; i < n; i++) await tick(); };
+const localInput = (ms) => {
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+};
+function twoChannels(app) {
+  app.state.channelCount = 2;
+  app.state.channels = [{ camera: 1, name: 'K1' }, { camera: 2, name: 'K2' }];
+  app.state.sourceCatalog = ['1', '2'];
+}
+
+test('the bandwidth adds up the per-track bitrates the stream library reports', async () => {
+  const app = await browser();
+  // media-stream-library: one value per track (video, audio).
+  app.state.tiles[0].pipeline.bitrate = [2_000_000, 128_000];
+  assert.equal(app.totalBitrate(), 2_128_000);
+  app.updateBandwidth();
+  assert.match(app.element('netRate').textContent, /2\.1 Mbit\/s/);
+});
+
+test('skipping forward in live view keeps the running streams', async () => {
+  const app = await browser();
+  const tile = app.state.tiles[0];
+  const running = tile.pipeline;
+  app.skipForwardAll(5000);
+  assert.equal(tile.pipeline, running);
+  assert.equal(tile.mode, 'live');
+});
+
+test('a layout change keeps a pause and the current layout does not reconnect', async () => {
+  const app = await browser();
+  twoChannels(app);
+  app.setLayout('1');
+  const live = app.state.tiles[0].pipeline;
+  app.setLayout('1');
+  assert.equal(app.state.tiles[0].pipeline, live, 'same layout must not reconnect');
+
+  app.element('btnPause').events.click();
+  const pausedAt = app.state.tiles[0].pausedAt;
+  app.setLayout('2');
+  for (const tile of app.state.tiles.slice(0, 2)) {
+    assert.equal(tile.visible, true);
+    assert.equal(tile.mode, 'paused');
+    assert.equal(tile.pipeline, null);
+    assert.equal(tile.pausedAt, pausedAt);
+  }
+});
+
+test('zooming a paused tile keeps it paused', async () => {
+  const app = await browser();
+  twoChannels(app);
+  app.setLayout('2');
+  app.element('btnPause').events.click();
+  app.element('tile1').events.dblclick({});
+  assert.equal(app.state.tiles[0].channel, 2);
+  assert.equal(app.state.tiles[0].mode, 'paused');
+  assert.equal(app.state.tiles[0].pipeline, null);
+  app.element('tile0').events.dblclick({});
+  assert.equal(app.state.tiles[0].channel, 1);
+  assert.ok(app.state.tiles.slice(0, 2).every((tile) => tile.mode === 'paused' && tile.pipeline == null));
+});
+
+test('jumping to a typed time seeks every visible tile', async () => {
+  const app = await browser();
+  twoChannels(app);
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.route(() => recordings(2,
+    recording('one', fixtureTime, fixtureTime + 60000, { source: '1' }),
+    recording('two', fixtureTime, fixtureTime + 60000, { source: '2' }),
+  ));
+  app.element('jumpTime').value = localInput(fixtureTime + 20000);
+  app.element('jumpForm').events.submit({ preventDefault() {} });
+  await ticks();
+  assert.equal(app.state.tiles[0].pipeline.parameters[0], 'recordingid=one');
+  assert.equal(app.state.tiles[1].pipeline.parameters[0], 'recordingid=two');
+});
+
+test('ambiguous source choices belong to their tile', async () => {
+  const app = await browser();
+  twoChannels(app);
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.state.layoutSize = 2;
+  app.route(() => recordings(1, recording('nosource', fixtureTime, undefined, { source: '' })));
+  await app.playAt(fixtureTime + 10000, { tile: app.state.tiles[0] });
+  await app.playAt(fixtureTime + 10000, { tile: app.state.tiles[1] });
+  const list = app.element('sourceChoiceList').options;
+  assert.equal(list.length, 1, 'only the active tile lists its choices');
+
+  app.element('tile1').events.pointerdown();
+  assert.equal(list.length, 1);
+  assert.match(app.element('sourceChoiceHint').textContent, /^K2: /);
+  list[0].events.click();
+  assert.equal(app.state.tiles[1].pipeline.parameters[0], 'recordingid=nosource');
+  assert.equal(app.state.tiles[0].pipeline, null, 'the other tile still waits for its own choice');
+  assert.equal(app.element('sourceChoices').classList.contains('hidden'), true);
+});
+
+test('a deliberately emptied tile stays empty after a reload', async () => {
+  const app = await browser({
+    session: { layout: '2', channels: [1, null], active: 0 },
+    route: (url) => (url.searchParams.get('group') === 'Properties.Image.NbrOfViews'
+      ? 'root.Properties.Image.NbrOfViews=2' : undefined),
+  });
+  await ticks();
+  assert.equal(app.state.tiles[1].visible, true);
+  assert.equal(app.state.tiles[1].channel, null);
+});
+
+test('only an RTSP rejection disables audio, and only for this session', async () => {
+  const app = await browser();
+  const tile = app.state.tiles[0];
+  app.element('tileAudio').events.click();
+  assert.equal(app.local.get('minivms.audio.1'), '1');
+  tile.pipeline.rtsp.onError(new Error('RTSP/1.0 415 Unsupported Media Type'));
+  assert.equal(tile.audio, false);
+  assert.equal(app.local.get('minivms.audio.1'), '1', 'the saved preference stays');
+
+  const other = await browser();
+  const second = other.state.tiles[0];
+  other.element('tileAudio').events.click();
+  other.win.mediaStreamLibrary.Html5VideoPipeline = class { constructor() { throw new Error('websocket'); } };
+  other.goLive();
+  assert.equal(second.audio, true, 'a connection failure is not an audio problem');
+  assert.equal(second.streamStatus, 'error');
+});
+
+test('a recording without an audio track is requested without audio', async () => {
+  const app = await browser();
+  app.element('tileAudio').events.click();
+  app.route(() => recordings(1, recording('silent')));
+  await app.playAt(fixtureTime + 1000);
+  assert.ok(app.state.pipeline.parameters.includes('audio=0'));
+  app.route(() => recordings(1, recording('loud', fixtureTime, fixtureTime + 60000, {}, [xml('audio')])));
+  await app.playAt(fixtureTime + 2000);
+  assert.ok(app.state.pipeline.parameters.includes('audio=1'));
+});
+
+test('a timeline selection started in the future ends at now', async () => {
+  const app = await browser();
+  const now = Date.now();
+  app.setView(now - 60000, now + 60000, { fetch: false });
+  const canvas = app.element('timeline');
+  canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: 700, offsetY: 5 });
+  canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: 100, offsetY: 5 });
+  assert.ok(app.state.selStart <= Date.now());
+  assert.ok(app.state.selEnd < app.state.selStart);
+});
+
+test('the production script has no debug logging', () => {
+  const js = readFileSync(require.resolve('../app/html/app.js'), 'utf8');
+  assert.doesNotMatch(js, /console\.log\(/);
+});
+
+test('light and dark mode follow the saved choice and refresh the timeline colors', async () => {
+  const app = await browser();
+  const root = app.win.document.documentElement;
+  assert.equal(root.dataset.theme, 'dark'); // no system preference reported -> dark
+  app.setTheme('light');
+  assert.equal(root.dataset.theme, 'light');
+  assert.equal(app.local.get('minivms.theme'), 'light');
+  app.setTheme('dark');
+  assert.equal(root.dataset.theme, 'dark');
+  app.setTheme('nonsense');
+  assert.equal(app.local.get('minivms.theme'), 'system');
+
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  const css = readFileSync(require.resolve('../app/html/style.css'), 'utf8');
+  // The theme is set before the first paint, and both palettes define the canvas colors.
+  assert.ok(html.indexOf("localStorage.getItem('minivms.theme')") < html.indexOf('style.css'));
+  for (const theme of ['dark', 'light']) {
+    const block = css.match(new RegExp(`:root\\[data-theme="${theme}"\\][^{]*\\{([^}]*)\\}`))[1];
+    for (const token of ['--bg', '--text', '--muted', '--accent', '--tl-bg', '--tl-future', '--tl-playhead', '--sel']) {
+      assert.match(block, new RegExp(`${token}:`), `${theme} ${token}`);
+    }
+  }
+});
+
+test('one text size: the stylesheet sets no other font size than the shared token', () => {
+  const css = readFileSync(require.resolve('../app/html/style.css'), 'utf8');
+  const sizes = [...css.matchAll(/font-size:\s*([^;]+);/g)].map((m) => m[1].trim());
+  // The only exception is the step number drawn inside the skip icons.
+  assert.deepEqual([...new Set(sizes)].sort(), ['11px', 'var(--fs)']);
+  assert.match(css, /--fs:\s*15px/);
+});
+
+test('further export parts are offered as visible links in the export bar', async () => {
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  const links = html.match(/<ul id="expLinks"[^>]*>/)[0];
+  assert.doesNotMatch(links, /hidden/);
+  assert.ok(html.indexOf('id="expLinks"') > html.indexOf('id="selectionBar"'));
+  assert.ok(html.indexOf('id="expLinks"') < html.indexOf('id="inspector"'));
+});

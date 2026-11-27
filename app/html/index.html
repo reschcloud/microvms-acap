@@ -2,30 +2,39 @@
 <html lang="de">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta http-equiv="cache-control" content="no-cache">
+  <meta name="color-scheme" content="dark light">
   <title>Micro VMS</title>
+  <script>
+    /* Theme before the first paint (no flash): saved choice, otherwise the system setting. */
+    (function () {
+      var pref = null;
+      try { pref = localStorage.getItem('minivms.theme'); } catch (e) { /* storage blocked */ }
+      var light = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      document.documentElement.dataset.theme = pref === 'light' || pref === 'dark' ? pref : (light ? 'light' : 'dark');
+    })();
+  </script>
   <link rel="stylesheet" href="style.css">
   <script src="i18n.js"></script>
 </head>
 <body>
   <!-- Inline icon sprite: keeps the app self-contained (no icon font, no extra request). -->
   <svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
-    <symbol id="ic-play" viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></symbol>
-    <symbol id="ic-pause" viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></symbol>
-    <symbol id="ic-back-30" viewBox="0 0 24 24"><path d="M11.5 5v14L3 12zM21 5v14l-8.5-7z"/></symbol>
-    <symbol id="ic-back-5" viewBox="0 0 24 24"><path d="M14.5 5.5v13L5 12z"/></symbol>
-    <symbol id="ic-fwd-30" viewBox="0 0 24 24"><path d="M3 5v14l8.5-7zM12.5 5v14L21 12z"/></symbol>
-    <symbol id="ic-camera" viewBox="0 0 24 24"><path fill-rule="evenodd" d="M4 6h3.2L9 4h6l1.8 2H20a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1zm8 3.4a4.6 4.6 0 1 0 0 9.2 4.6 4.6 0 0 0 0-9.2z"/></symbol>
-    <symbol id="ic-stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></symbol>
+    <symbol id="ic-play" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l11-6.5a1 1 0 0 0 0-1.72l-11-6.5A1 1 0 0 0 8 5.5z"/></symbol>
+    <symbol id="ic-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
+    <symbol id="ic-back-30" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="ic-back-5" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="ic-fwd-30" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7M20 4v4.5h-4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="ic-camera" viewBox="0 0 24 24"><path d="M4 7.5h3l1.6-2h6.8l1.6 2h3a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.4" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
     <symbol id="ic-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 15v5h-5M4 15v5h5M20 9V4h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
-    <symbol id="ic-sliders" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="7" r="2" fill="currentColor"/><circle cx="15" cy="12" r="2" fill="currentColor"/><circle cx="8" cy="17" r="2" fill="currentColor"/></symbol>
+    <symbol id="ic-sliders" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="9" cy="7" r="2.4" fill="currentColor"/><circle cx="15" cy="12" r="2.4" fill="currentColor"/><circle cx="8" cy="17" r="2.4" fill="currentColor"/></symbol>
     <symbol id="ic-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
     <symbol id="ic-lock-open" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 7.5-1.9" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
     <symbol id="ic-scissors" viewBox="0 0 24 24"><circle cx="6" cy="7" r="2.6" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.2 8.6L20 18M8.2 15.4L20 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="ic-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="ic-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9.5 9a2.5 2.5 0 1 1 3.7 2.2c-.8.5-1.2 1-1.2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="17" r="1" fill="currentColor"/></symbol>
-    <symbol id="ic-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></symbol>
+    <symbol id="ic-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></symbol>
     <symbol id="ic-speaker" viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="ic-speaker-off" viewBox="0 0 24 24"><path d="M3 9h4l5-4v14l-5-4H3z"/><path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="ic-chevron-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
@@ -35,12 +44,9 @@
   </svg>
 
   <header class="topbar">
-    <div class="brand">
-      <span data-i18n="app.title">Micro VMS</span>
-      <span id="deviceName" class="muted"></span>
-    </div>
+    <div class="brand" data-i18n="app.title">Micro VMS</div>
     <div id="layoutSeg" class="segmented" role="group" data-i18n-title="layout.label">
-      <button type="button" data-layout="auto" aria-pressed="true" data-i18n-title="layout.auto">Auto</button>
+      <button type="button" data-layout="auto" aria-pressed="true" data-i18n="layout.short.auto" data-i18n-title="layout.auto">Auto</button>
       <button type="button" data-layout="1" aria-pressed="false" data-i18n-title="layout.1">1</button>
       <button type="button" data-layout="2" aria-pressed="false" data-i18n-title="layout.2">2</button>
       <button type="button" data-layout="4" aria-pressed="false" data-i18n-title="layout.4">4</button>
@@ -55,14 +61,14 @@
     </select>
     <div class="topbar-right">
       <button id="statusChip" class="status-chip" type="button" aria-haspopup="true" aria-expanded="false" data-i18n-title="inspector.open">
-        <span id="statusDot" class="status-dot"></span>
+        <span class="status-dot" aria-hidden="true"></span>
         <span id="recordingIndicator" class="recording-indicator" role="status" data-i18n="rec.loading"></span>
       </button>
       <button id="btnTheater" class="icon-button" type="button" aria-pressed="false" data-i18n-title="theater.toggle">
-        <svg class="icon" width="18" height="18"><use href="#ic-expand"/></svg>
+        <svg class="icon"><use href="#ic-expand"/></svg>
       </button>
-      <button id="btnInspector" class="icon-button" type="button" aria-expanded="true" data-i18n-title="inspector.title">
-        <svg class="icon" width="18" height="18"><use href="#ic-sliders"/></svg>
+      <button id="btnInspector" class="icon-button" type="button" aria-expanded="false" data-i18n-title="inspector.title">
+        <svg class="icon"><use href="#ic-sliders"/></svg>
       </button>
     </div>
   </header>
@@ -72,19 +78,18 @@
       <div id="videoGrid" class="video-grid layout-1">
         <div class="video-wrap" id="tile0" data-tile="0" tabindex="0">
           <video id="video" muted autoplay playsinline></video>
-          <div id="modeBadge" class="badge" data-i18n="badge.connecting"></div>
-          <div id="clock" class="clock">–</div>
-          <div id="videoMsg" class="video-msg hidden" role="status"></div>
-          <span id="tileStateDot" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel" class="tile-label"></div>
+          <div id="clock" class="clock">–</div>
+          <div id="modeBadge" class="badge" data-i18n="badge.connecting"></div>
+          <div id="videoMsg" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
-              <svg class="icon" width="16" height="16"><use id="tileAudioIcon" href="#ic-speaker-off"/></svg>
+              <svg class="icon"><use id="tileAudioIcon" href="#ic-speaker-off"/></svg>
             </button>
             <details id="tileOptions" class="tile-options">
               <summary class="tile-icon" data-i18n-title="tile.menu">
-                <svg class="icon" width="16" height="16"><use href="#ic-more"/></svg>
+                <svg class="icon"><use href="#ic-more"/></svg>
               </summary>
               <div class="tile-menu-body">
                 <label><span data-i18n="tile.channel">Kanal</span>
@@ -107,19 +112,18 @@
         </div>
         <div class="video-wrap hidden" id="tile1" data-tile="1" tabindex="0">
           <video id="video2" muted autoplay playsinline></video>
-          <div id="modeBadge2" class="badge" data-i18n="badge.connecting"></div>
-          <div id="clock2" class="clock">–</div>
-          <div id="videoMsg2" class="video-msg hidden" role="status"></div>
-          <span id="tileStateDot2" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel2" class="tile-label"></div>
+          <div id="clock2" class="clock">–</div>
+          <div id="modeBadge2" class="badge" data-i18n="badge.connecting"></div>
+          <div id="videoMsg2" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta2" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio2" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
-              <svg class="icon" width="16" height="16"><use id="tileAudioIcon2" href="#ic-speaker-off"/></svg>
+              <svg class="icon"><use id="tileAudioIcon2" href="#ic-speaker-off"/></svg>
             </button>
             <details id="tileOptions2" class="tile-options">
               <summary class="tile-icon" data-i18n-title="tile.menu">
-                <svg class="icon" width="16" height="16"><use href="#ic-more"/></svg>
+                <svg class="icon"><use href="#ic-more"/></svg>
               </summary>
               <div class="tile-menu-body">
                 <label><span data-i18n="tile.channel">Kanal</span>
@@ -142,19 +146,18 @@
         </div>
         <div class="video-wrap hidden" id="tile2" data-tile="2" tabindex="0">
           <video id="video3" muted autoplay playsinline></video>
-          <div id="modeBadge3" class="badge" data-i18n="badge.connecting"></div>
-          <div id="clock3" class="clock">–</div>
-          <div id="videoMsg3" class="video-msg hidden" role="status"></div>
-          <span id="tileStateDot3" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel3" class="tile-label"></div>
+          <div id="clock3" class="clock">–</div>
+          <div id="modeBadge3" class="badge" data-i18n="badge.connecting"></div>
+          <div id="videoMsg3" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta3" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio3" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
-              <svg class="icon" width="16" height="16"><use id="tileAudioIcon3" href="#ic-speaker-off"/></svg>
+              <svg class="icon"><use id="tileAudioIcon3" href="#ic-speaker-off"/></svg>
             </button>
             <details id="tileOptions3" class="tile-options">
               <summary class="tile-icon" data-i18n-title="tile.menu">
-                <svg class="icon" width="16" height="16"><use href="#ic-more"/></svg>
+                <svg class="icon"><use href="#ic-more"/></svg>
               </summary>
               <div class="tile-menu-body">
                 <label><span data-i18n="tile.channel">Kanal</span>
@@ -177,19 +180,18 @@
         </div>
         <div class="video-wrap hidden" id="tile3" data-tile="3" tabindex="0">
           <video id="video4" muted autoplay playsinline></video>
-          <div id="modeBadge4" class="badge" data-i18n="badge.connecting"></div>
-          <div id="clock4" class="clock">–</div>
-          <div id="videoMsg4" class="video-msg hidden" role="status"></div>
-          <span id="tileStateDot4" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel4" class="tile-label"></div>
+          <div id="clock4" class="clock">–</div>
+          <div id="modeBadge4" class="badge" data-i18n="badge.connecting"></div>
+          <div id="videoMsg4" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta4" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio4" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
-              <svg class="icon" width="16" height="16"><use id="tileAudioIcon4" href="#ic-speaker-off"/></svg>
+              <svg class="icon"><use id="tileAudioIcon4" href="#ic-speaker-off"/></svg>
             </button>
             <details id="tileOptions4" class="tile-options">
               <summary class="tile-icon" data-i18n-title="tile.menu">
-                <svg class="icon" width="16" height="16"><use href="#ic-more"/></svg>
+                <svg class="icon"><use href="#ic-more"/></svg>
               </summary>
               <div class="tile-menu-body">
                 <label><span data-i18n="tile.channel">Kanal</span>
@@ -212,19 +214,18 @@
         </div>
         <div class="video-wrap hidden" id="tile4" data-tile="4" tabindex="0">
           <video id="video5" muted autoplay playsinline></video>
-          <div id="modeBadge5" class="badge" data-i18n="badge.connecting"></div>
-          <div id="clock5" class="clock">–</div>
-          <div id="videoMsg5" class="video-msg hidden" role="status"></div>
-          <span id="tileStateDot5" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel5" class="tile-label"></div>
+          <div id="clock5" class="clock">–</div>
+          <div id="modeBadge5" class="badge" data-i18n="badge.connecting"></div>
+          <div id="videoMsg5" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta5" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio5" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
-              <svg class="icon" width="16" height="16"><use id="tileAudioIcon5" href="#ic-speaker-off"/></svg>
+              <svg class="icon"><use id="tileAudioIcon5" href="#ic-speaker-off"/></svg>
             </button>
             <details id="tileOptions5" class="tile-options">
               <summary class="tile-icon" data-i18n-title="tile.menu">
-                <svg class="icon" width="16" height="16"><use href="#ic-more"/></svg>
+                <svg class="icon"><use href="#ic-more"/></svg>
               </summary>
               <div class="tile-menu-body">
                 <label><span data-i18n="tile.channel">Kanal</span>
@@ -247,19 +248,18 @@
         </div>
         <div class="video-wrap hidden" id="tile5" data-tile="5" tabindex="0">
           <video id="video6" muted autoplay playsinline></video>
-          <div id="modeBadge6" class="badge" data-i18n="badge.connecting"></div>
-          <div id="clock6" class="clock">–</div>
-          <div id="videoMsg6" class="video-msg hidden" role="status"></div>
-          <span id="tileStateDot6" class="tile-state-dot" aria-hidden="true"></span>
           <div id="tileLabel6" class="tile-label"></div>
+          <div id="clock6" class="clock">–</div>
+          <div id="modeBadge6" class="badge" data-i18n="badge.connecting"></div>
+          <div id="videoMsg6" class="video-msg hidden" role="status"></div>
           <button id="tileEmptyCta6" class="tile-empty-cta hidden" type="button" data-i18n="tile.pickChannel">Kanal wählen</button>
           <div class="tile-tools">
             <button id="tileAudio6" class="tile-icon" type="button" aria-pressed="false" data-i18n-title="tile.audio.off">
-              <svg class="icon" width="16" height="16"><use id="tileAudioIcon6" href="#ic-speaker-off"/></svg>
+              <svg class="icon"><use id="tileAudioIcon6" href="#ic-speaker-off"/></svg>
             </button>
             <details id="tileOptions6" class="tile-options">
               <summary class="tile-icon" data-i18n-title="tile.menu">
-                <svg class="icon" width="16" height="16"><use href="#ic-more"/></svg>
+                <svg class="icon"><use href="#ic-more"/></svg>
               </summary>
               <div class="tile-menu-body">
                 <label><span data-i18n="tile.channel">Kanal</span>
@@ -283,99 +283,108 @@
       </div>
 
       <div id="ptzLayer" class="ptz-layer">
-      <div id="ptzCard" class="card hidden">
-        <h3 data-i18n="ptz.title"></h3>
-        <div id="ptzHint" class="muted small"></div>
-        <div class="ptz-main">
-          <div id="ptzPad" class="ptz-pad">
-            <button data-dir="-1,1" data-i18n-title="ptz.dir.ul">↖</button>
-            <button data-dir="0,1" data-i18n-title="ptz.dir.u">▲</button>
-            <button data-dir="1,1" data-i18n-title="ptz.dir.ur">↗</button>
-            <button data-dir="-1,0" data-i18n-title="ptz.dir.l">◀</button>
-            <button id="ptzHome" data-i18n-title="ptz.home">⌂</button>
-            <button data-dir="1,0" data-i18n-title="ptz.dir.r">▶</button>
-            <button data-dir="-1,-1" data-i18n-title="ptz.dir.dl">↙</button>
-            <button data-dir="0,-1" data-i18n-title="ptz.dir.d">▼</button>
-            <button data-dir="1,-1" data-i18n-title="ptz.dir.dr">↘</button>
+        <div id="ptzCard" class="card hidden">
+          <div class="card-title" data-i18n="ptz.title"></div>
+          <div id="ptzHint" class="muted"></div>
+          <div class="ptz-main">
+            <div id="ptzPad" class="ptz-pad">
+              <button data-dir="-1,1" data-i18n-title="ptz.dir.ul">↖</button>
+              <button data-dir="0,1" data-i18n-title="ptz.dir.u">↑</button>
+              <button data-dir="1,1" data-i18n-title="ptz.dir.ur">↗</button>
+              <button data-dir="-1,0" data-i18n-title="ptz.dir.l">←</button>
+              <button id="ptzHome" data-i18n-title="ptz.home">⌂</button>
+              <button data-dir="1,0" data-i18n-title="ptz.dir.r">→</button>
+              <button data-dir="-1,-1" data-i18n-title="ptz.dir.dl">↙</button>
+              <button data-dir="0,-1" data-i18n-title="ptz.dir.d">↓</button>
+              <button data-dir="1,-1" data-i18n-title="ptz.dir.dr">↘</button>
+            </div>
+            <div id="ptzZoomRow" class="ptz-zoom">
+              <button id="ptzZoomIn" data-i18n-title="ptz.zoomIn">＋</button>
+              <span class="muted" data-i18n="ptz.zoom"></span>
+              <button id="ptzZoomOut" data-i18n-title="ptz.zoomOut">－</button>
+            </div>
           </div>
-          <div id="ptzZoomRow" class="ptz-zoom">
-            <button id="ptzZoomIn" data-i18n-title="ptz.zoomIn">＋</button>
-            <span class="muted small" data-i18n="ptz.zoom"></span>
-            <button id="ptzZoomOut" data-i18n-title="ptz.zoomOut">－</button>
+          <label><span><span data-i18n="ptz.speed"></span> <span id="ptzSpeedVal"></span></span>
+            <input type="range" id="ptzSpeed" min="5" max="100" step="5" value="50">
+          </label>
+          <div id="ptzPresetRow" class="row">
+            <select id="ptzPreset" class="grow"></select>
+            <button id="ptzGoPreset" data-i18n="ptz.goto"></button>
+            <button id="ptzReloadPresets" data-i18n-title="ptz.reload">↻</button>
           </div>
+          <label id="ptzCenterRow" class="inline"><input type="checkbox" id="ptzClickCenter" checked> <span data-i18n="ptz.clickCenter"></span></label>
         </div>
-        <label><span><span data-i18n="ptz.speed"></span> <span id="ptzSpeedVal"></span></span>
-          <input type="range" id="ptzSpeed" min="5" max="100" step="5" value="50">
-        </label>
-        <div id="ptzPresetRow" class="row">
-          <select id="ptzPreset" class="grow"></select>
-          <button id="ptzGoPreset" data-i18n="ptz.goto"></button>
-          <button id="ptzReloadPresets" data-i18n-title="ptz.reload">↻</button>
-        </div>
-        <label id="ptzCenterRow" class="inline"><input type="checkbox" id="ptzClickCenter" checked> <span data-i18n="ptz.clickCenter"></span></label>
-        <div class="muted small" data-i18n="ptz.keyboard"></div>
-      </div>
       </div>
 
       <div id="tilePager" class="tile-pager hidden">
-        <button id="pagerPrev" class="icon-button" type="button" data-i18n-title="pager.prev">‹</button>
+        <button id="pagerPrev" class="icon-button" type="button" data-i18n-title="pager.prev"><svg class="icon"><use href="#ic-chevron-left"/></svg></button>
         <span id="pagerDots" class="pager-dots">1 / 1</span>
-        <button id="pagerNext" class="icon-button" type="button" data-i18n-title="pager.next">›</button>
+        <button id="pagerNext" class="icon-button" type="button" data-i18n-title="pager.next"><svg class="icon"><use href="#ic-chevron-right"/></svg></button>
       </div>
 
       <div id="sourceChoices" class="card hidden" aria-labelledby="sourceChoiceHint">
         <div id="sourceChoiceHint" role="status"></div>
-        <div id="sourceChoiceList" class="row"></div>
+        <div id="sourceChoiceList" class="choice-list"></div>
       </div>
-      <div id="manualSourceInfo" class="small muted hidden" role="status"></div>
+      <div id="manualSourceInfo" class="notice hidden" role="status"></div>
+
       <div class="controls">
-        <button id="btnLive" class="live-btn" data-i18n-title="live.btn.title" disabled><span id="liveLabel" data-i18n="live.btn"></span></button>
-        <span id="liveSep" class="sep"></span>
-        <button id="btnBack" data-i18n-title="ctl.back.title">
-          <svg class="icon" width="16" height="16"><use href="#ic-back-30"/></svg><span>30 s</span>
-        </button>
-        <button id="btnBack5" data-i18n-title="ctl.back5.title">
-          <svg class="icon" width="16" height="16"><use href="#ic-back-5"/></svg><span>5 s</span>
-        </button>
-        <button id="btnPause" data-i18n-title="ctl.pause.title">
-          <svg class="icon" width="16" height="16"><use id="pauseIcon" href="#ic-pause"/></svg>
-        </button>
-        <button id="btnFwd" data-i18n-title="ctl.fwd.title">
-          <span>30 s</span><svg class="icon" width="16" height="16"><use href="#ic-fwd-30"/></svg>
-        </button>
-        <button id="btnRetryPlayback" class="hidden" data-i18n="ctl.retryPlayback"></button>
-        <span class="sep"></span>
-        <button id="btnSnapshot" data-i18n-title="ctl.snapshot.title" disabled>
-          <svg class="icon" width="16" height="16"><use href="#ic-camera"/></svg><span data-i18n="ctl.snapshot"></span>
-        </button>
+        <div class="controls-side">
+          <button id="btnSnapshot" class="pill" type="button" data-i18n-title="ctl.snapshot.title" disabled>
+            <svg class="icon"><use href="#ic-camera"/></svg><span data-i18n="ctl.snapshot"></span>
+          </button>
+        </div>
+        <div class="transport">
+          <button id="btnBack" class="round" type="button" data-i18n-title="ctl.back.title">
+            <svg class="icon"><use href="#ic-back-30"/></svg><span class="step">30</span>
+          </button>
+          <button id="btnBack5" class="round" type="button" data-i18n-title="ctl.back5.title">
+            <svg class="icon"><use href="#ic-back-5"/></svg><span class="step">5</span>
+          </button>
+          <button id="btnPause" class="round main" type="button" data-i18n-title="ctl.pause.title">
+            <svg class="icon"><use id="pauseIcon" href="#ic-pause"/></svg>
+          </button>
+          <button id="btnFwd" class="round" type="button" data-i18n-title="ctl.fwd.title">
+            <svg class="icon"><use href="#ic-fwd-30"/></svg><span class="step">30</span>
+          </button>
+        </div>
+        <div class="controls-side end">
+          <button id="btnRetryPlayback" class="pill hidden" type="button" data-i18n="ctl.retryPlayback"></button>
+          <button id="btnLive" class="pill live-btn" type="button" data-i18n-title="live.btn.title" disabled>
+            <span class="live-dot" aria-hidden="true"></span><span id="liveLabel" data-i18n="live.btn"></span>
+          </button>
+        </div>
       </div>
     </section>
 
     <section class="timeline-panel">
       <div class="tl-toolbar">
-        <button id="btnPrevDay" data-i18n-title="tl.prevDay"><svg class="icon" width="16" height="16"><use href="#ic-chevron-left"/></svg></button>
-        <label class="inline"><span data-i18n="tl.day"></span><input type="date" id="dayPicker"></label>
-        <button id="btnNextDay" data-i18n-title="tl.nextDay"><svg class="icon" width="16" height="16"><use href="#ic-chevron-right"/></svg></button>
-        <button id="btnToday" data-i18n="tl.today"></button>
-        <span class="sep"></span>
-        <button id="btnZoomOut" data-i18n-title="tl.zoomOut"><svg class="icon" width="16" height="16"><use href="#ic-minus"/></svg></button>
-        <button id="btnZoomIn" data-i18n-title="tl.zoomIn"><svg class="icon" width="16" height="16"><use href="#ic-plus"/></svg></button>
-        <button id="btnFitDay" data-i18n="tl.fitShort" data-i18n-title="tl.fitDay"></button>
-        <span class="sep"></span>
-        <button id="btnClip" class="primary-soft" type="button" data-i18n-title="clip.title">
-          <svg class="icon" width="16" height="16"><use href="#ic-scissors"/></svg><span data-i18n="clip.btn">Clip sichern</span>
-        </button>
-        <details class="tl-time">
-          <summary data-i18n="tl.jumpTime.short">Zeit</summary>
-          <form id="jumpForm" class="row">
-            <label class="inline"><span data-i18n="tl.jumpTime"></span><input type="datetime-local" id="jumpTime" step="1" required></label>
-            <button type="submit" data-i18n="tl.jump"></button>
-          </form>
-        </details>
+        <div class="tl-group">
+          <button id="btnPrevDay" class="icon-button" type="button" data-i18n-title="tl.prevDay"><svg class="icon"><use href="#ic-chevron-left"/></svg></button>
+          <label class="date-field"><span class="sr-only" data-i18n="tl.day"></span><input type="date" id="dayPicker"></label>
+          <button id="btnNextDay" class="icon-button" type="button" data-i18n-title="tl.nextDay"><svg class="icon"><use href="#ic-chevron-right"/></svg></button>
+          <button id="btnToday" class="pill" type="button" data-i18n="tl.today"></button>
+        </div>
+        <div class="tl-group">
+          <button id="btnZoomOut" class="icon-button" type="button" data-i18n-title="tl.zoomOut"><svg class="icon"><use href="#ic-minus"/></svg></button>
+          <button id="btnZoomIn" class="icon-button" type="button" data-i18n-title="tl.zoomIn"><svg class="icon"><use href="#ic-plus"/></svg></button>
+        </div>
         <span class="legend">
-          <i class="lg continuous"></i><span data-i18n="tl.legend.record"></span>
-          <i class="lg triggered"></i><span data-i18n="tl.legend.triggered"></span>
+          <span><i class="lg continuous"></i><span data-i18n="tl.legend.record"></span></span>
+          <span><i class="lg triggered"></i><span data-i18n="tl.legend.triggered"></span></span>
         </span>
+        <div class="tl-group end">
+          <details class="tl-time">
+            <summary class="pill" data-i18n="tl.jumpTime.short">Uhrzeit</summary>
+            <form id="jumpForm" class="popover">
+              <label><span data-i18n="tl.jumpTime"></span><input type="datetime-local" id="jumpTime" step="1" required></label>
+              <button type="submit" class="pill accent" data-i18n="tl.jump"></button>
+            </form>
+          </details>
+          <button id="btnClip" class="pill accent" type="button" data-i18n-title="clip.title">
+            <svg class="icon"><use href="#ic-scissors"/></svg><span data-i18n="clip.btn">Clip sichern</span>
+          </button>
+        </div>
       </div>
       <div id="selectionBar" class="selection-bar hidden">
         <div class="selection-main">
@@ -383,112 +392,125 @@
           <div id="selChannels" class="selection-channels"></div>
         </div>
         <div class="selection-actions">
-          <button id="btnExport" class="primary" data-i18n="exp.save">Sichern</button>
           <details id="exportOptions" class="export-options">
-            <summary data-i18n="exp.options">Optionen</summary>
-            <div class="export-options-body">
-              <label><span data-i18n="exp.from"></span> <input type="datetime-local" id="expStart" step="1"></label>
-              <label><span data-i18n="exp.to"></span> <input type="datetime-local" id="expEnd" step="1"></label>
-              <label><span data-i18n="exp.name"></span> <input type="text" id="expName" placeholder="export"></label>
+            <summary class="pill" data-i18n="exp.options">Optionen</summary>
+            <div class="export-options-body popover">
+              <label><span data-i18n="exp.from"></span><input type="datetime-local" id="expStart" step="1"></label>
+              <label><span data-i18n="exp.to"></span><input type="datetime-local" id="expEnd" step="1"></label>
+              <label><span data-i18n="exp.name"></span><input type="text" id="expName" placeholder="export"></label>
               <label class="inline"><input type="checkbox" id="expMerge" checked> <span data-i18n="exp.merge"></span></label>
+              <label class="inline"><input type="checkbox" id="expAudio" checked> <span data-i18n="exp.audio"></span></label>
+              <div id="expAudioHint" class="muted hidden" data-i18n="exp.audio.none"></div>
               <label class="inline"><input type="checkbox" id="expPwEnable"> <span data-i18n="exp.password"></span></label>
               <label id="expPwRow" class="hidden"><span data-i18n="exp.password.placeholder"></span><input type="password" id="expPw" autocomplete="new-password"></label>
-              <label class="inline"><input type="checkbox" id="expAudio" checked> <span data-i18n="exp.audio"></span></label>
-              <div id="expAudioHint" class="small muted hidden" data-i18n="exp.audio.none"></div>
             </div>
           </details>
-          <button id="btnCancelExport" class="hidden" data-i18n="exp.cancel"></button>
-          <button id="btnClearSel" class="icon-button" type="button" data-i18n-title="close">×</button>
+          <button id="btnCancelExport" class="pill hidden" type="button" data-i18n="exp.cancel"></button>
+          <button id="btnExport" class="pill accent" type="button" data-i18n="exp.save">Sichern</button>
+          <button id="btnClearSel" class="icon-button" type="button" data-i18n-title="close"><svg class="icon"><use href="#ic-close"/></svg></button>
         </div>
-        <div id="expInfo" class="selection-info small muted" role="status"></div>
+        <div id="expInfo" class="selection-info muted" role="status"></div>
+        <ul id="expLinks" class="links"></ul>
       </div>
       <div class="tl-body">
         <div id="tlLabels" class="tl-labels"></div>
         <div class="tl-canvas-wrap">
           <canvas id="timeline" tabindex="0" aria-label="Timeline"></canvas>
           <div id="tlTooltip" class="tl-tooltip hidden"></div>
-          <div id="timelineStatus" class="tl-status small hidden" role="status"></div>
+          <div id="timelineStatus" class="tl-status hidden" role="status"></div>
         </div>
       </div>
     </section>
-
-
   </main>
 
-    <aside id="inspector" class="inspector" aria-hidden="true" aria-label="Werkzeuge">
-      <div class="inspector-head">
-        <strong data-i18n="inspector.title">Werkzeuge</strong>
-        <div class="inspector-head-actions">
-          <div class="lang-switch" data-i18n-title="lang.switch">
-            <button data-lang="de">DE</button><button data-lang="en">EN</button>
-          </div>
-          <button id="btnHelp" class="icon-button" type="button" aria-haspopup="dialog" data-i18n-title="help.open">
-            <svg class="icon" width="18" height="18"><use href="#ic-help"/></svg>
-          </button>
-          <button id="btnInspectorClose" class="icon-button" type="button" data-i18n-title="close">×</button>
+  <aside id="inspector" class="inspector" aria-hidden="true">
+    <div class="inspector-head">
+      <strong data-i18n="inspector.title">Einstellungen</strong>
+      <button id="btnInspectorClose" class="icon-button" type="button" data-i18n-title="close"><svg class="icon"><use href="#ic-close"/></svg></button>
+    </div>
+    <div class="inspector-body">
+      <section class="setting">
+        <div class="setting-title" data-i18n="theme.label">Darstellung</div>
+        <div id="themeSeg" class="segmented wide" role="group">
+          <button type="button" data-theme-pref="system" aria-pressed="true" data-i18n="theme.system">Automatisch</button>
+          <button type="button" data-theme-pref="light" aria-pressed="false" data-i18n="theme.light">Hell</button>
+          <button type="button" data-theme-pref="dark" aria-pressed="false" data-i18n="theme.dark">Dunkel</button>
         </div>
-      </div>
-      <div class="inspector-body">
-        <div class="inspector-status">
-          <div id="netStatus" class="net-status" data-i18n-title="net.title">
-            <span id="netPing" data-i18n="net.ping.none">Ping –</span>
-            <span id="netRate" data-i18n="net.rate.none">↓ –</span>
-          </div>
-          <div class="storage-card">
-            <div class="storage-row">
-              <span id="storageDiskName" class="storage-name"></span>
-              <span id="storageLock" class="storage-lock hidden" data-i18n-title="storage.encrypted">
-                <svg class="icon" width="16" height="16"><use id="storageLockIcon" href="#ic-lock-open"/></svg>
-              </span>
-              <span id="storageUsed" class="storage-used"></span>
-            </div>
-            <div class="storage-bar" role="img"><span id="storageFill"></span></div>
-            <div id="storageStatus" class="storage muted small"></div>
-          </div>
+      </section>
+      <section class="setting">
+        <div class="setting-title" data-i18n="settings.language">Sprache</div>
+        <div class="segmented wide lang-switch" role="group">
+          <button type="button" data-lang="de">Deutsch</button>
+          <button type="button" data-lang="en">English</button>
         </div>
-
-
-        <ul id="expLinks" class="links hidden" aria-hidden="true"></ul>
-      </div>
-    </aside>
+      </section>
+      <section class="setting">
+        <div class="setting-title" data-i18n="settings.connection">Verbindung</div>
+        <div id="netStatus" class="net-status" data-i18n-title="net.title">
+          <span id="netPing" data-i18n="net.ping.none">Ping –</span>
+          <span id="netRate" data-i18n="net.rate.none">↓ –</span>
+        </div>
+      </section>
+      <section class="setting">
+        <div class="setting-title" data-i18n="settings.storage">Speicher</div>
+        <div class="storage-card">
+          <div class="storage-row">
+            <span id="storageDiskName" class="storage-name"></span>
+            <span id="storageLock" class="storage-lock hidden" data-i18n-title="storage.encrypted">
+              <svg class="icon"><use id="storageLockIcon" href="#ic-lock-open"/></svg>
+            </span>
+            <span id="storageUsed" class="storage-used"></span>
+          </div>
+          <div id="storageBar" class="storage-bar" role="img"><span id="storageFill"></span></div>
+          <div id="storageStatus" class="storage muted"></div>
+        </div>
+      </section>
+      <section class="setting">
+        <div class="setting-title" data-i18n="settings.device">Gerät</div>
+        <div id="deviceName" class="muted"></div>
+      </section>
+      <button id="btnHelp" class="row-button" type="button" aria-haspopup="dialog">
+        <svg class="icon"><use href="#ic-help"/></svg><span data-i18n="help.title">Tastatur und Bedienung</span>
+      </button>
+    </div>
+  </aside>
 
   <div id="toast" class="toast hidden" role="status"></div>
 
   <dialog id="helpDialog" class="help-dialog">
     <div class="help-head">
       <strong data-i18n="help.title">Tastatur und Bedienung</strong>
-      <button id="btnHelpClose" class="icon-button" type="button" data-i18n-title="close">×</button>
+      <button id="btnHelpClose" class="icon-button" type="button" data-i18n-title="close"><svg class="icon"><use href="#ic-close"/></svg></button>
     </div>
     <div class="help-grid">
       <section>
-        <h4 data-i18n="help.playback">Wiedergabe</h4>
+        <div class="setting-title" data-i18n="help.playback">Wiedergabe</div>
         <p><kbd>Space</kbd> <span data-i18n="help.pause">Pause / Weiter</span></p>
         <p><kbd>L</kbd> <span data-i18n="help.live">Live</span></p>
-        <p><kbd>←</kbd>/<kbd>→</kbd> <span data-i18n="help.step5">5 s zurück / vor</span></p>
-        <p><kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd> <span data-i18n="help.step30">30 s zurück / vor</span></p>
+        <p><kbd>←</kbd> <kbd>→</kbd> <span data-i18n="help.step5">5 s zurück / vor</span></p>
+        <p><kbd>Shift</kbd> <kbd>←</kbd> <kbd>→</kbd> <span data-i18n="help.step30">30 s zurück / vor</span></p>
       </section>
       <section>
-        <h4 data-i18n="help.view">Ansicht</h4>
-        <p><kbd>1</kbd><kbd>2</kbd><kbd>4</kbd><kbd>6</kbd> <span data-i18n="help.layout">Raster</span></p>
+        <div class="setting-title" data-i18n="help.view">Ansicht</div>
+        <p><kbd>1</kbd> <kbd>2</kbd> <kbd>4</kbd> <kbd>6</kbd> <span data-i18n="help.layout">Raster</span></p>
         <p><kbd>A</kbd> <span data-i18n="help.auto">Auto-Layout</span></p>
-        <p><kbd>F</kbd> <span data-i18n="help.theater">Vollbild / Theater</span></p>
-        <p><kbd>+</kbd>/<kbd>−</kbd> <span data-i18n="help.zoom">Timeline zoomen</span></p>
+        <p><kbd>F</kbd> <span data-i18n="help.theater">Vollbild</span></p>
+        <p><kbd>+</kbd> <kbd>−</kbd> <span data-i18n="help.zoom">Timeline zoomen</span></p>
       </section>
       <section>
-        <h4 data-i18n="help.export">Sichern</h4>
+        <div class="setting-title" data-i18n="help.export">Sichern</div>
         <p><kbd>E</kbd> <span data-i18n="help.exportSelection">Auswahl exportieren</span></p>
         <p><kbd>Esc</kbd> <span data-i18n="help.close">Schließen / Auswahl löschen</span></p>
         <p><kbd>?</kbd> <span data-i18n="help.openHelp">Diese Hilfe</span></p>
       </section>
       <section>
-        <h4 data-i18n="help.gestures">Maus und Touch</h4>
+        <div class="setting-title" data-i18n="help.gestures">Maus und Touch</div>
         <p data-i18n="help.gestureRuler">Im Zeitlineal ziehen: Bereich wählen</p>
         <p data-i18n="help.gestureLane">In einer Spur ziehen: verschieben</p>
         <p data-i18n="help.gestureWheel">Mausrad / Pinch: zoomen</p>
         <p data-i18n="help.gesturePtz">Alt+Pfeile: PTZ auf der aktiven Live-Kachel</p>
       </section>
     </div>
-    <div class="help-foot muted small" data-i18n="help.foot">Tooltips erscheinen beim Überfahren oder per Tastaturfokus.</div>
   </dialog>
 
   <div id="tooltip" class="tooltip hidden" role="tooltip"></div>

@@ -86,6 +86,7 @@
       muteUntilPlaying: false,     // unmute after the next playing event
       lastFrame: null,             // canvas with the last visible frame (pause/snapshot)
       picker: null,                // immediate channel chooser for empty tiles
+      sourceChoices: null,         // { intent, time, choices } for an ambiguous lookup
       noRecording: false,          // held at a time without footage
       pipeline: null,
       generation: 0,
@@ -464,12 +465,11 @@
     if (state.zoomReturn) {
       const saved = state.zoomReturn;
       state.zoomReturn = null;
-      const time = currentWall(activeTile());
-      const wasLive = visibleTiles().length > 0
-        && visibleTiles().every((t) => t.mode === 'live' && t.pendingSeek == null);
+      const shared = sharedTime(activeTile());
       saved.channels.forEach((channel, index) => {
         const target = state.tiles[index];
         if (!target) return;
+        if (target.channel !== channel) clearTileVideo(target);
         target.channel = channel;
         target.channelTouched = true;
         loadTilePreferences(target);
@@ -479,15 +479,12 @@
       applyLayout();
       const target = state.tiles[saved.active] || state.tiles[0];
       if (target?.visible) setActiveTile(target);
-      if (wasLive) goLiveAll();
-      else if (Number.isFinite(time)) playAtAll(time);
+      restoreSharedTime(shared);
       return;
     }
     if (state.layoutSize <= 1) return;
 
-    const wasLive = visibleTiles().length > 0
-      && visibleTiles().every((t) => t.mode === 'live' && t.pendingSeek == null);
-    const time = tile.pendingSeek ?? currentWall(tile);
+    const shared = sharedTime(tile);
     const manual = tile.manualRecording;
     state.zoomReturn = {
       layout: state.layout,
@@ -497,18 +494,20 @@
     const first = state.tiles[0];
     const replaced = first !== tile || first.channel !== tile.channel;
     state.layout = '1';
+    if (replaced) clearTileVideo(first);
     first.channel = tile.channel;
     first.channelTouched = true;
     first.manualRecording = manual;
     loadTilePreferences(first);
     state.active = 0;
-    if (replaced) stopPipeline(first);
     applyLayout();
     setActiveTile(first);
-    if (replaced) {
-      if (wasLive) goLive(true, first);
-      else playAt(time, { tile: first, reuseManual: true, clearOldStream: true });
-    }
+    if (!replaced) return;
+    if (shared.live) goLive(true, first);
+    else if (shared.paused) {
+      holdAt(first, shared.time, '', { checkFootage: false });
+      verifyPausedFootage(first, shared.time);
+    } else playAt(shared.time, { tile: first, reuseManual: true, clearOldStream: true });
   }
 
   function wireTile(tile) {
@@ -771,11 +770,38 @@
     tile.intent = new AbortController();
     tile.pendingSeek = null;
     tile.manualRecording = null;
-    if (tile === activeTile()) {
-      $('sourceChoices').classList.add('hidden');
-      $('sourceChoiceList').replaceChildren();
+    if (tile.sourceChoices) {
+      tile.sourceChoices = null;
+      if (tile === activeTile()) renderSourceChoices();
     }
     return tile.intent;
+  }
+
+  /** The source list belongs to one tile; the sidebar card shows the active tile's list. */
+  function renderSourceChoices() {
+    const tile = activeTile();
+    const list = $('sourceChoiceList');
+    list.replaceChildren();
+    const offer = tile.sourceChoices;
+    $('sourceChoices').classList.toggle('hidden', !offer);
+    if (!offer) return;
+    const { intent, time, choices } = offer;
+    for (const [i, rec] of choices.slice(0, 12).entries()) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = t('video.sourceChoice', {
+        n: i + 1, when: fmtDateTime(rec.start), source: rec.source || t('video.sourceMissing'),
+      });
+      button.addEventListener('click', () => {
+        if (!isCurrentIntent(intent, tile)) return;
+        newPlaybackIntent(tile);
+        tile.manualRecording = rec;
+        startRecording(tile, rec, Math.max(rec.start, time));
+      });
+      list.appendChild(button);
+    }
+    const hint = t(choices.length > 12 ? 'video.sourceLimited' : 'video.sourceHint');
+    $('sourceChoiceHint').textContent = state.layoutSize > 1 ? `${channelName(tile.channel)}: ${hint}` : hint;
   }
 
   const isCurrentIntent = (intent, tile = activeTile()) =>
@@ -808,7 +834,8 @@
     tile.el.classList.remove('no-recording');
     setStreamStatus(tile, 'connecting', t('video.connecting'));
     if (!MSL?.Html5VideoPipeline) { setStreamStatus(tile, 'error', t('video.libMissing')); return; }
-    const fail = (msg, reconnect = false) => {
+    const requestedAudio = parameters.includes('audio=1');
+    const fail = (msg, { reconnect = false, rejected = false } = {}) => {
       if (gen !== tile.generation) return;
       const lastWall = currentWall(tile);
       stopPipeline(tile);
@@ -819,13 +846,13 @@
         tile.streamTimer = setTimeout(() => {
           if (tile.generation === closedGen && isCurrentIntent(intent, tile)) goLive(false, tile);
         }, 2000);
-      } else if (audioEnabled(tile) && !tile.audioFailed && tile.pendingSeek == null) {
-        // Audio can make the camera reject the RTSP request (e.g. unsupported AAC).
-        // Keep the video alive and retry once without audio.
+      } else if (rejected && requestedAudio && !tile.audioFailed && tile.pendingSeek == null) {
+        // Only an RTSP rejection can be caused by audio (e.g. unsupported AAC); a timeout
+        // or a broken connection is not. Retry once without audio for this session; the
+        // saved preference stays, so the next visit tries audio again.
         tile.audioFailed = true;
         tile.audio = false;
         tile.muteUntilPlaying = false;
-        store.set(`audio.${tile.channel}`, '0');
         applyTileMuted(tile);
         updateTileAudio(tile);
         toast(t('tile.audio.failed'), true);
@@ -867,11 +894,11 @@
       if (tile.mode === 'playback' && tile.pendingSeek == null && tile.rec?.stop != null && Math.abs(currentWall(tile) - tile.rec.stop) < 2000) {
         onRecordingEnded(tile);
       } else {
-        fail(t('video.disconnected'), true);
+        fail(t('video.disconnected'), { reconnect: true });
       }
     };
     pipeline.rtsp.onError = (err) => {
-      fail(t('video.rtspError', { msg: err.message || err }));
+      fail(t('video.rtspError', { msg: err.message || err }), { rejected: true });
     };
     pipeline.rtsp.onRtcp = (rtcp) => {
       if (gen !== tile.generation) return;
@@ -892,7 +919,9 @@
       });
   }
 
-  const audioParams = (tile) => (audioEnabled(tile) ? ['audio=1', 'audiocodec=aac'] : ['audio=0']);
+  /** A recording without an audio track is requested without audio. */
+  const audioParams = (tile, rec = null) => (audioEnabled(tile) && rec?.hasAudio !== false
+    ? ['audio=1', 'audiocodec=aac'] : ['audio=0']);
 
   function liveParameters(tile = activeTile()) {
     const params = [`camera=${tile.channel}`];
@@ -949,10 +978,8 @@
       const result = await findRecordingAtOrAfter(time, { channel: tile.channel });
       if (tile.mode !== 'paused' || tile.pausedAt !== time) return;
       const has = Boolean(result.rec || result.choices?.length);
-      if (!has) console.log('VERIFY-NO', tile.channel, time, result, state.channelCount, state.channels);
       markNoRecording(tile, !has);
-      if (!has) videoMsg(tile, t('video.noRecording'));
-      else if (tile.noRecording === false) videoMsg(tile, '');
+      if (has) videoMsg(tile, '');
     } catch (e) { /* keep the held frame without a false warning */ }
   }
 
@@ -961,30 +988,15 @@
     tile.rec = rec;
     tile.startWall = time;
     tile.pausedAt = null;
-    $('jumpTime').value = toLocalInput(time);
-    startPipeline(tile, [`recordingid=${encodeURIComponent(rec.id)}`, ...audioParams(tile)],
+    if (tile === activeTile()) $('jumpTime').value = toLocalInput(time);
+    startPipeline(tile, [`recordingid=${encodeURIComponent(rec.id)}`, ...audioParams(tile, rec)],
       Math.max(0, (time - rec.start) / 1000));
   }
 
   function offerRecordings(tile, intent, time, choices) {
     holdAt(tile, time, t('video.chooseSource'), { checkFootage: false });
-    const list = $('sourceChoiceList');
-    for (const [i, rec] of choices.slice(0, 12).entries()) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = t('video.sourceChoice', {
-        n: i + 1, when: fmtDateTime(rec.start), source: rec.source || t('video.sourceMissing'),
-      });
-      button.addEventListener('click', () => {
-        if (!isCurrentIntent(intent, tile)) return;
-        newPlaybackIntent(tile);
-        tile.manualRecording = rec;
-        startRecording(tile, rec, Math.max(rec.start, time));
-      });
-      list.appendChild(button);
-    }
-    $('sourceChoiceHint').textContent = t(choices.length > 12 ? 'video.sourceLimited' : 'video.sourceHint');
-    $('sourceChoices').classList.remove('hidden');
+    tile.sourceChoices = { intent, time, choices };
+    if (tile === activeTile()) renderSourceChoices();
   }
 
   async function playAt(time, { clearOldStream = false, reuseManual = false, preferUnassigned = false, tile = activeTile() } = {}) {
@@ -1132,8 +1144,43 @@
 
   function skipForwardAll(seconds) {
     for (const tile of visibleTiles()) {
+      // Live is already "now": skipping forward would only reconnect the stream.
+      if (tile.mode === 'live' && tile.pendingSeek == null) continue;
       playAt((tile.pendingSeek ?? currentWall(tile)) + seconds, { reuseManual: true, tile });
     }
+  }
+
+  /** Shared time state of the visible tiles, kept across layout changes and zoom. */
+  function sharedTime(tile = activeTile()) {
+    const tiles = visibleTiles();
+    const all = (fn) => tiles.length > 0 && tiles.every((t) => t.pendingSeek == null && fn(t));
+    return {
+      live: all((t) => t.mode === 'live'),
+      paused: all((t) => t.mode === 'paused'),
+      time: tile.pendingSeek ?? currentWall(tile),
+    };
+  }
+
+  function holdAllAt(time) {
+    for (const tile of visibleTiles()) {
+      newPlaybackIntent(tile);
+      holdAt(tile, time, '', { checkFootage: false });
+      verifyPausedFootage(tile, time);
+    }
+  }
+
+  function restoreSharedTime(shared) {
+    if (shared.live) goLiveAll();
+    else if (shared.paused && Number.isFinite(shared.time)) holdAllAt(shared.time);
+    else if (Number.isFinite(shared.time)) playAtAll(shared.time);
+  }
+
+  /** A tile that now shows another channel must not keep the old channel's picture. */
+  function clearTileVideo(tile) {
+    stopPipeline(tile);
+    tile.lastFrame = null;
+    tile.video.removeAttribute?.('src');
+    tile.video.load?.();
   }
 
   function togglePauseAll() {
@@ -1260,6 +1307,7 @@
     state.active = tile.id;
     state.tiles.forEach((t) => t.el.classList.toggle('active', t === tile));
     renderPager();
+    renderSourceChoices();
     updateModeUi(tile);
     if (!changed) return;
     if (tile.channel != null) store.set('channel', String(tile.channel));
@@ -1298,7 +1346,6 @@
     const hideLive = allLive && allPlaying;
     lb.disabled = false;
     lb.classList.toggle('hidden', hideLive);
-    $('liveSep').classList.toggle('hidden', hideLive);
     $('liveLabel').textContent = allLive ? t(allPlaying ? 'live.btn' : 'live.retry') : t('live.back');
     const mode = live && !playing ? tile.streamStatus : seeking ? 'seeking' : tile.mode;
     if (mode !== announcedMode) {
@@ -1311,27 +1358,37 @@
 
   const canvas = $('timeline');
   const ctx = canvas.getContext('2d');
-  const css = getComputedStyle(document.documentElement);
+  const css = getComputedStyle(document.documentElement);   // live: follows the theme
   const cssVar = (n, d) => css.getPropertyValue(n).trim() || d;
-  const COLORS = {
-    bg: cssVar('--panel-2', '#1e242c'),
-    line: cssVar('--line', '#2a313b'),
-    text: cssVar('--muted', '#8a94a3'),
-    continuous: cssVar('--continuous', '#3b82f6'),
-    triggered: cssVar('--triggered', '#f59e0b'),
-    scheduled: cssVar('--scheduled', '#a855f7'),
-    other: cssVar('--other', '#60c8bd'),
-    sel: cssVar('--sel', 'rgba(255,204,51,.25)'),
-    accent: cssVar('--accent', '#ffcc33'),
-    live: cssVar('--live', '#e5484d'),
-  };
+  const COLORS = {};
+  /** The canvas cannot use CSS variables directly: re-read them after a theme change. */
+  function readColors() {
+    Object.assign(COLORS, {
+      bg: cssVar('--tl-bg', '#1e242c'),
+      line: cssVar('--line', '#2a313b'),
+      text: cssVar('--muted', '#8a94a3'),
+      future: cssVar('--tl-future', 'rgba(0,0,0,0.35)'),
+      continuous: cssVar('--continuous', '#3b82f6'),
+      triggered: cssVar('--triggered', '#f59e0b'),
+      scheduled: cssVar('--scheduled', '#a855f7'),
+      other: cssVar('--other', '#60c8bd'),
+      sel: cssVar('--sel', 'rgba(255,204,51,.25)'),
+      accent: cssVar('--accent', '#ffcc33'),
+      live: cssVar('--live', '#e5484d'),
+      font: cssVar('--font', 'system-ui, sans-serif'),
+    });
+  }
+  readColors();
   const TICK_STEPS = [MIN, 2 * MIN, 5 * MIN, 10 * MIN, 15 * MIN, 30 * MIN, HOUR, 2 * HOUR, 3 * HOUR, 6 * HOUR, 12 * HOUR, DAY];
 
   const canvasWidth = () => canvas.clientWidth;
   const xOf = (time) => ((time - state.viewStart) / (state.viewEnd - state.viewStart)) * canvasWidth();
   const tOf = (x) => state.viewStart + (x / canvasWidth()) * (state.viewEnd - state.viewStart);
-  const LANE_TOP = 24;
-  const LANE_HEIGHT = 32;
+  // Keep in sync with .tl-label / .tl-label.head in style.css.
+  const LANE_TOP = 28;
+  const LANE_HEIGHT = 36;
+  const FONT_PX = 15;           // the one text size of the UI, also on the canvas
+  const TICK_MIN_PX = 96;       // room for a date label at that size
 
   /** Unique visible channels in tile order (duplicate tiles share one lane). */
   function timelineChannels() {
@@ -1477,15 +1534,15 @@
 
     if (now < state.viewEnd) {                         // shade the future
       const xn = Math.max(0, xOf(now));
-      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillStyle = COLORS.future;
       ctx.fillRect(xn, 0, W - xn, H);
     }
 
-    const step = TICK_STEPS.find((s) => (W / (span / s)) >= 70) || DAY;
+    const step = TICK_STEPS.find((s) => (W / (span / s)) >= TICK_MIN_PX) || DAY;
     const tzOffset = new Date(state.viewStart).getTimezoneOffset() * MIN;
     const changesOffset = new Date(state.viewEnd).getTimezoneOffset() * MIN !== tzOffset;
     let tick = Math.ceil((state.viewStart - tzOffset) / step) * step + tzOffset;
-    ctx.font = '12px system-ui, sans-serif';
+    ctx.font = `${FONT_PX}px ${COLORS.font}`;
     ctx.textBaseline = 'top';
     for (; tick <= state.viewEnd; tick += step) {
       const d = new Date(tick);
@@ -1494,10 +1551,10 @@
       const x = Math.round(xOf(tick)) + (isMidnight ? 0 : 0.5);
       ctx.strokeStyle = isMidnight ? COLORS.text : COLORS.line;
       ctx.lineWidth = isMidnight ? 2 : 1;
-      ctx.beginPath(); ctx.moveTo(x, 18); ctx.lineTo(x, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, LANE_TOP - 6); ctx.lineTo(x, H); ctx.stroke();
       ctx.fillStyle = COLORS.text;
       const hour = fmtTime(tick, step < MIN * 1.5);
-      ctx.fillText(isMidnight ? fmtDate(tick) : changesOffset ? `${hour} ${fmtOffset(tick)}` : hour, x + 3, 4);
+      ctx.fillText(isMidnight ? fmtDate(tick) : changesOffset ? `${hour} ${fmtOffset(tick)}` : hour, x + 4, 4);
     }
     ctx.lineWidth = 1;
 
@@ -1513,7 +1570,7 @@
         const pixels = recordingPixels(r);
         if (!pixels) return;
         ctx.fillStyle = color;
-        ctx.fillRect(pixels.left, y + 2, pixels.width, LANE_HEIGHT - 6);
+        ctx.fillRect(pixels.left, y + 6, pixels.width, LANE_HEIGHT - 14);
       };
       // Blue for every recording, then yellow for events so overlaps stay yellow.
       for (const r of lane.recs) if (r.type !== 'triggered') bar(r, COLORS.continuous);
@@ -1542,10 +1599,11 @@
     if (xp >= 0 && xp <= W) {
       ctx.strokeStyle = state.mode === 'live' ? COLORS.live : COLORS.accent;
       ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(xp, 16); ctx.lineTo(xp, H); ctx.stroke();
+      const top = LANE_TOP - 8;
+      ctx.beginPath(); ctx.moveTo(xp, top); ctx.lineTo(xp, H); ctx.stroke();
       ctx.lineWidth = 1;
       ctx.fillStyle = ctx.strokeStyle;
-      ctx.beginPath(); ctx.moveTo(xp - 5, 14); ctx.lineTo(xp + 5, 14); ctx.lineTo(xp, 20); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(xp - 6, top - 2); ctx.lineTo(xp + 6, top - 2); ctx.lineTo(xp, top + 5); ctx.fill();
     }
   }
 
@@ -1698,7 +1756,8 @@
     if (Math.abs(dx) > 3) drag.moved = true;
     if (!drag.moved) return;
     if (drag.mode === 'select') {
-      state.selStart = drag.t0;
+      // There is no footage in the future: both ends stop at "now".
+      state.selStart = Math.min(drag.t0, Date.now());
       state.selEnd = Math.min(tOf(ev.offsetX), Date.now());
       syncSelectionInputs();
       draw();
@@ -1927,7 +1986,6 @@
     const request = new AbortController();
     const { signal } = request;
     exportAbort = request;
-    setInspector(true);
     $('btnExport').disabled = $('btnClearSel').disabled = true;
     $('btnCancelExport').classList.remove('hidden');
     $('expInfo').textContent = t('exp.checking');
@@ -1978,7 +2036,7 @@
             } catch (e) {
               if (e instanceof window.MkvConcat.MkvConcatIncompatibleError) {
                 await exportSeparate(chosen, base, null, {
-                  auto: autoDownload, includeAudio, signal: null, clipChannel, label,
+                  auto: autoDownload, includeAudio, signal, clipChannel, label,
                 });
                 autoDownload = false;
                 $('expInfo').textContent = t('exp.incompatible', { n: chosen.length });
@@ -2021,8 +2079,15 @@
     return bps >= 1e6 ? `${(bps / 1e6).toFixed(1)} Mbit/s` : `${Math.round(bps / 1e3)} kbit/s`;
   }
 
+  /** media-stream-library reports one bitrate per track (video, audio). */
+  function pipelineBitrate(pipeline) {
+    const value = pipeline?.bitrate;
+    const values = Array.isArray(value) ? value : [value];
+    return values.reduce((sum, v) => sum + (Number(v) || 0), 0);
+  }
+
   function totalBitrate() {
-    return visibleTiles().reduce((sum, tile) => sum + (Number(tile.pipeline?.bitrate) || 0), 0);
+    return visibleTiles().reduce((sum, tile) => sum + pipelineBitrate(tile.pipeline), 0);
   }
 
   function updateBandwidth() {
@@ -2083,6 +2148,7 @@
     const disk = state.disks?.find((d) => d.id === 'SD_DISK')
       || state.disks?.find((d) => d.status === 'ok')
       || state.disks?.[0];
+    $('storageBar')?.classList.toggle('hidden', !disk);
     if (!disk) {
       nameEl.textContent = t('storage.none');
       usedEl.textContent = '';
@@ -2134,14 +2200,13 @@
       })).filter((d) => d.id);
       state.storageState = 'ready';
       const gb = (kb) => (kb / 1024 / 1024).toFixed(1);
-      const parts = state.disks
-        .filter((d) => d.status && d.status !== 'disconnected')
-        .map((d) => {
-          const status = d.status !== 'ok' ? d.status : t(writableDisk(d) ? 'storage.ready' : 'storage.notWritable');
-          return `${diskName(d.id)}: ${status}${d.total > 0 ? ' · ' + t('storage.used', { used: gb(d.total - d.free), total: gb(d.total) }) : ''}`;
-        });
-      const text = parts.length ? `${t('storage.label')}: ${parts.join(' | ')}` : t('storage.none');
-      $('storageStatus').textContent = text;
+      const connected = state.disks.filter((d) => d.status && d.status !== 'disconnected');
+      const statusOf = (d) => (d.status !== 'ok' ? d.status : t(writableDisk(d) ? 'storage.ready' : 'storage.notWritable'));
+      // The meter above already names the main disk and its usage: here only its state,
+      // and a short line for each further disk.
+      $('storageStatus').textContent = connected.length === 1 ? statusOf(connected[0])
+        : connected.map((d) => `${diskName(d.id)}: ${statusOf(d)}${d.total > 0
+          ? ' · ' + t('storage.used', { used: gb(d.total - d.free), total: gb(d.total) }) : ''}`).join(' · ');
     } catch (e) {
       state.disks = null;
       state.storageState = e.status === 401 || e.status === 403 ? 'forbidden' : 'unknown';
@@ -2223,15 +2288,14 @@
 
   $('btnSnapshot').addEventListener('click', takeSnapshot);
   function setLayout(value) {
+    // The current layout again: nothing to do (no reconnect, no lost pause).
+    if (String(value) === String(state.layout) && !state.zoomReturn) return;
     state.zoomReturn = null;
-    const wasLive = visibleTiles().length > 0
-      && visibleTiles().every((tile) => tile.mode === 'live' && tile.pendingSeek == null);
-    const time = activeTile().pendingSeek ?? currentWall(activeTile());
+    const shared = sharedTime(activeTile());
     state.layout = value;
     store.set('layout', state.layout);
     applyLayout();
-    if (wasLive) goLiveAll();
-    else if (Number.isFinite(time)) playAtAll(time);
+    restoreSharedTime(shared);
     refreshRecordings();
   }
 
@@ -2258,7 +2322,37 @@
     if (ev.target.closest?.('.channel-picker')) return;
     state.tiles.forEach((tile) => hideChannelPicker(tile));
   });
-  setInspector(store.get('inspector') !== '0');
+  // Settings are secondary: the sheet stays closed until it is asked for.
+  setInspector(store.get('inspector') === '1');
+
+  // ------------------------------------------------------------ Theme
+
+  const THEMES = ['system', 'light', 'dark'];
+  const lightQuery = window.matchMedia?.('(prefers-color-scheme: light)');
+  const themePreference = () => (THEMES.includes(store.get('theme')) ? store.get('theme') : 'system');
+
+  /** "system" follows the operating system; the head script sets the first value before paint. */
+  function applyTheme() {
+    const pref = themePreference();
+    const resolved = pref === 'system' ? (lightQuery?.matches ? 'light' : 'dark') : pref;
+    if (document.documentElement) document.documentElement.dataset.theme = resolved;
+    document.querySelectorAll?.('#themeSeg [data-theme-pref]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.themePref === pref));
+    });
+    readColors();
+    if (state.viewEnd > state.viewStart) draw();
+  }
+
+  function setTheme(pref) {
+    store.set('theme', THEMES.includes(pref) ? pref : 'system');
+    applyTheme();
+  }
+
+  document.querySelectorAll?.('#themeSeg [data-theme-pref]').forEach((button) => {
+    button.addEventListener('click', () => setTheme(button.dataset.themePref));
+  });
+  lightQuery?.addEventListener?.('change', () => { if (themePreference() === 'system') applyTheme(); });
+  applyTheme();
 
   // ------------------------------------------------------------ Help and theater
 
@@ -2451,13 +2545,12 @@
   $('btnToday').addEventListener('click', () => showDay(startOfDay(Date.now())));
   $('btnZoomIn').addEventListener('click', () => zoom(0.5, state.mode === 'live' ? null : currentWall()));
   $('btnZoomOut').addEventListener('click', () => zoom(2));
-  $('btnFitDay').addEventListener('click', () => showDay(startOfDay((state.viewStart + state.viewEnd) / 2)));
   $('jumpForm').addEventListener('submit', (ev) => {
     ev.preventDefault();
     const time = fromLocalInput($('jumpTime').value);
     if (!Number.isFinite(time) || time > Date.now()) { toast(t('tl.invalidTime'), true); return; }
     if (time < state.viewStart || time >= state.viewEnd) showDay(startOfDay(time));
-    playAt(time);
+    playAtAll(time);   // one shared wall clock drives every visible tile (ADR 0006)
   });
 
   $('expStart').addEventListener('change', selectionFromInputs);
@@ -2564,7 +2657,8 @@
     if (session && Array.isArray(session.channels)) {
       session.channels.forEach((camera, index) => {
         const tile = state.tiles[index];
-        if (tile && state.channels.some((c) => c.camera === camera)) {
+        // null is a deliberately emptied slot and must stay empty.
+        if (tile && (camera === null || state.channels.some((c) => c.camera === camera))) {
           tile.channel = camera;
           tile.channelTouched = true;
           loadTilePreferences(tile);

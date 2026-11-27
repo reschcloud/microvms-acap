@@ -1,6 +1,6 @@
 # ADR 0011: Per-tile audio with mute fallback; recording is owned by AXIS OS
 
-**Status:** Accepted, implemented (2026-11-27)
+**Status:** Accepted, implemented (2026-11-27); audio fallback refined by ADR 0013
 
 ## Context
 

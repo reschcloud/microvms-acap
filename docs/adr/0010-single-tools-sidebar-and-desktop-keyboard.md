@@ -1,6 +1,6 @@
 # ADR 0010: One tools sidebar, calm tiles, and desktop-first keyboard use
 
-**Status:** Accepted, implemented (2026-11-27)
+**Status:** Accepted, implemented (2026-11-27); sidebar and tile styling superseded by ADR 0013
 
 ## Context
 
