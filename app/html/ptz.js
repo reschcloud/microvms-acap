@@ -161,7 +161,7 @@
 
   // Click position in the video element -> pixel in the stream (object-fit: contain)
   function videoPoint(ev) {
-    const v = $('video');
+    const v = ev.currentTarget;
     const vw = v.videoWidth; const vh = v.videoHeight;
     if (!vw || !vh) return null;
     const r = v.getBoundingClientRect();
@@ -183,7 +183,10 @@
     if (!live) stopAll();
     $('ptzCard').classList.toggle('disabled', !live);
     $('ptzHint').textContent = live ? '' : t('ptz.onlyLive');
-    $('video').classList.toggle('ptz-active', active() && $('ptzClickCenter').checked);
+    const videos = (ui() && ui().videos && ui().videos()) || [$('video')];
+    for (const video of videos) video.classList.remove('ptz-active');
+    const current = (ui() && ui().activeVideo && ui().activeVideo()) || $('video');
+    if (current) current.classList.toggle('ptz-active', active() && $('ptzClickCenter').checked);
   }
 
   async function applyChannel(camera) {
@@ -192,8 +195,9 @@
     ptz.camera = camera;
     ptz.enabled = false;
     $('ptzCard').classList.add('hidden');
-    $('video').classList.remove('ptz-active');
-    if (!(await ptz.allowed)) return;
+    const videos = (ui() && ui().videos && ui().videos()) || [$('video')];
+    for (const video of videos) video.classList.remove('ptz-active');
+    if (camera == null || !(await ptz.allowed)) return;
     const cmds = await channelCommands(camera);
     if (seq !== ptz.applySeq) return;
     ptz.commands = cmds;
@@ -228,25 +232,29 @@
     $('ptzPreset').addEventListener('dblclick', () => $('ptzGoPreset').click());
     $('ptzReloadPresets').addEventListener('click', loadPresets);
 
-    const video = $('video');
+    const videos = (ui() && ui().videos && ui().videos()) || [$('video')];
     $('ptzClickCenter').addEventListener('change', () => setLive(ptz.live));
-    video.addEventListener('click', (ev) => {
-      if (!active() || !$('ptzClickCenter').checked || !supports('center')) return;
-      const p = videoPoint(ev);
-      if (!p) return;
-      send({ center: `${p.x},${p.y}`, imagewidth: String(p.w), imageheight: String(p.h) });
-    });
     let wheelTimer = null;
-    video.addEventListener('wheel', (ev) => {
-      if (!active() || !$('ptzClickCenter').checked || !supports('areazoom')) return;
-      ev.preventDefault();
-      if (wheelTimer) return;                      // throttle: max. 1 command / 400 ms
-      wheelTimer = setTimeout(() => { wheelTimer = null; }, 400);
-      const p = videoPoint(ev);
-      if (!p) return;
-      const z = ev.deltaY < 0 ? 200 : 50;          // >100 zoom in, <100 zoom out
-      send({ areazoom: `${p.x},${p.y},${z}`, imagewidth: String(p.w), imageheight: String(p.h) });
-    }, { passive: false });
+    for (const video of videos) {
+      video.addEventListener('click', (ev) => {
+        if (!active() || video !== ((ui() && ui().activeVideo && ui().activeVideo()) || video)) return;
+        if (!$('ptzClickCenter').checked || !supports('center')) return;
+        const p = videoPoint(ev);
+        if (!p) return;
+        send({ center: `${p.x},${p.y}`, imagewidth: String(p.w), imageheight: String(p.h) });
+      });
+      video.addEventListener('wheel', (ev) => {
+        if (!active() || video !== ((ui() && ui().activeVideo && ui().activeVideo()) || video)) return;
+        if (!$('ptzClickCenter').checked || !supports('areazoom')) return;
+        ev.preventDefault();
+        if (wheelTimer) return;                      // throttle: max. 1 command / 400 ms
+        wheelTimer = setTimeout(() => { wheelTimer = null; }, 400);
+        const p = videoPoint(ev);
+        if (!p) return;
+        const z = ev.deltaY < 0 ? 200 : 50;          // >100 zoom in, <100 zoom out
+        send({ areazoom: `${p.x},${p.y},${z}`, imagewidth: String(p.w), imageheight: String(p.h) });
+      }, { passive: false });
+    }
 
     const keys = {
       ArrowLeft: () => startPanTilt(-1, 0), ArrowRight: () => startPanTilt(1, 0),

@@ -25,3 +25,23 @@ Offene Punkte vor der Umsetzung:
   Browser funktioniert auch ohne, das Anfahren nicht.
 - **UI:** Home-Button mit kleiner Auswahl (Dropdown oder Presets-Zeile),
   bestehende Bedienung darf nicht enger werden.
+
+## Audio in der Live-Ansicht (umgesetzt)
+
+Stand 2026-11-26: Pro Kachel ein Lautsprecher-Icon, mehrere Kacheln gleichzeitig
+möglich, AAC über die MSE-Pipeline (`audio=1&audiocodec=aac`), Tonwahl pro Kanal
+in `localStorage`. Nach einem Reload bleibt die Wahl gespeichert, der Ton wird
+aber erst nach der ersten Nutzergeste hörbar. Wiedergabe liefert Ton nur, wenn
+die Aufnahme eine Tonspur hat. Neue Daueraufnahmen können optional mit
+„Mit Ton aufzeichnen (AAC)“ angelegt werden.
+
+Offen: Kameratest (AAC über RTSP-over-WebSocket, Rechte, Mehrfach-Ton) und
+Prüfung, ob Zuhören eine eigene AXIS-OS-Gruppe verlangt.
+
+## Schnappschuss in der Wiedergabe (umgesetzt)
+
+Stand 2026-11-26: Live weiterhin über `/axis-cgi/jpg/image.cgi`; in Wiedergabe
+und Pause wird der sichtbare Frame per Canvas als JPEG gespeichert. Beim
+Pausieren wird der letzte Frame vor dem Schließen der Pipeline gesichert.
+Dateiname mit Kanal und Frame-Zeit. Offen: Kameratest mit echten
+Wiedergabeframes und pausiertem Bild.

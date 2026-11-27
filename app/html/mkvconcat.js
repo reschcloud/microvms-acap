@@ -127,6 +127,7 @@
   function* children(buf, start = 0, end = buf.length) {
     let p = start;
     while (p < end) {
+      const rawStart = p;
       const il = vintLen(buf[p]);
       let id = 0;
       for (let i = 0; i < il; i++) id = id * 256 + buf[p + i];
@@ -135,7 +136,7 @@
       let size = buf[p] & (0xFF >> sl);
       for (let i = 1; i < sl; i++) size = size * 256 + buf[p + i];
       p += sl;
-      yield { id, start: p, end: p + size };
+      yield { id, start: p, end: p + size, rawStart, rawEnd: p + size };
       p += size;
     }
   }
@@ -147,10 +148,11 @@
   const hex = (buf, s, e) => Array.from(buf.subarray(s, e), (b) => b.toString(16).padStart(2, '0')).join('');
   const str = (buf, s, e) => new TextDecoder().decode(buf.subarray(s, e)).replace(/\0+$/, '');
 
-  /** Spur-Signatur für den Kompatibilitätsvergleich + Nummer der Videospur. */
-  function analyzeTracks(buf) {
+  /** Spur-Signatur für den Kompatibilitätsvergleich + Nummern von Video/Audio. */
+  function analyzeTracks(buf, includeAudio = true) {
     const sig = [];
     let videoTrack = null;
+    const audioTracks = new Set();
     for (const te of children(buf)) {
       if (te.id !== ID.TrackEntry) continue;
       const t = {};
@@ -172,9 +174,28 @@
         }
       }
       if (t.type === 1 && videoTrack == null) videoTrack = t.num;
+      if (t.type === 2) audioTracks.add(t.num);
+      if (!includeAudio && t.type === 2) continue;
       sig.push([t.num, t.type, t.codec, t.priv || '', t.w || '', t.h || '', t.sr || '', t.ch || ''].join('|'));
     }
-    return { signature: sig.join(';'), videoTrack };
+    return { signature: sig.join(';'), videoTrack, audioTracks };
+  }
+
+  /** Tracks-Element ohne Audio-TrackEntries (für Exporte ohne Ton). */
+  function filterTracks(buf, includeAudio) {
+    if (includeAudio) return buf;
+    const parts = [];
+    for (const c of children(buf)) {
+      if (c.id === ID.TrackEntry) {
+        let type = null;
+        for (const x of children(buf, c.start, c.end)) {
+          if (x.id === ID.TrackType) type = readUint(buf, x.start, x.end);
+        }
+        if (type === 2) continue;
+      }
+      parts.push(buf.subarray(c.rawStart, c.rawEnd));
+    }
+    return concatBytes(parts);
   }
 
   /** Track-Nummer, relative Zeit und Keyframe-Flag eines (Simple)Blocks. */
@@ -243,6 +264,7 @@
    */
   async function concat(sources, opts = {}) {
     const onProgress = opts.onProgress || (() => {});
+    const includeAudio = opts.includeAudio !== false;
     let tracksBytes = null;
     let signature = null;
     let videoTrack = null;
@@ -275,6 +297,7 @@
       let maxAbs = null;      // größte Blockzeit (absolut, Quelle)
       let lastV = null; let minDelta = Infinity;  // für die Framedauer
       let partTracks = null;
+      let partAudio = new Set();
       let partHasVideo = false;
 
       // Top-Level
@@ -296,11 +319,12 @@
             else if (ts !== timecodeScale) throw new MkvConcatIncompatibleError('Different TimecodeScale');
           } else if (c.id === ID.Tracks) {
             const buf = await r.read(c.size);
-            const a = analyzeTracks(buf);
+            const a = analyzeTracks(buf, includeAudio);
             partTracks = a;
+            partAudio = a.audioTracks;
             if (signature == null) {
               signature = a.signature; videoTrack = a.videoTrack;
-              tracksBytes = el(ID.Tracks, buf);
+              tracksBytes = el(ID.Tracks, filterTracks(buf, includeAudio));
             } else if (a.signature !== signature) {
               throw new MkvConcatIncompatibleError('Recordings use different track/codec parameters');
             }
@@ -327,7 +351,9 @@
                   for (const x of children(body)) if (x.id === ID.Block) info = blockInfo(body, x.start);
                   if (info) info.key = false;
                 }
-                blocks.push({ id: ch.id, body, info });
+                if (includeAudio || !info || !partAudio.has(info.track)) {
+                  blocks.push({ id: ch.id, body, info });
+                }
               } else {
                 await r.skip(ch.size);   // Position, PrevSize, Void, CRC ...
               }

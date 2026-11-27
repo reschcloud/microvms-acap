@@ -10,7 +10,10 @@ const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').repla
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
     loadRecordingConfig, refreshActiveRecording, enableContinuous, disableContinuous, doExport, loadChannels,
-    refreshRecordings, trackGeometry, setView, draw };
+    refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked,
+    setView, draw, createTile, activeTile, stopPipeline,
+    autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
+    formatBitrate, totalBitrate, updateBandwidth, updatePing };
 })();`);
 
 function xml(name, attrs = {}, children = []) {
@@ -24,11 +27,11 @@ const recordings = (total, ...rows) => xml('root', {}, [xml('recordings', { numb
 const listConfigs = (...rows) => xml('root', {}, [xml('continuousrecordingconfigurations', {}, rows)]);
 const listDisks = (...rows) => xml('root', {}, [xml('disks', {}, rows)]);
 const fixtureTime = Date.UTC(2026, 9, 24, 10);
-const recording = (id, start = fixtureTime, stop = start + 60000, attrs = {}) => xml('recording', {
+const recording = (id, start = fixtureTime, stop = start + 60000, attrs = {}, children = []) => xml('recording', {
   recordingid: id, diskid: 'SD_DISK', starttime: new Date(start).toISOString(),
   stoptime: stop == null ? '' : new Date(stop).toISOString(), recordingtype: 'continuous',
   recordingstatus: 'completed', ...attrs,
-});
+}, children);
 const bad = (status) => ({ ok: false, status, statusText: 'test error' });
 const tick = () => new Promise(setImmediate);
 function deferred() {
@@ -57,6 +60,7 @@ async function browser() {
         addEventListener(type, fn) { this.events[type] = fn; },
         appendChild: (n) => children.push(n), replaceChildren: () => { children.length = 0; },
         getContext: () => canvasContext,
+        toDataURL: () => 'data:image/jpeg;base64,mock',
         play: async () => {}, pause() {}, setAttribute() {}, setPointerCapture() {},
       });
     }
@@ -102,23 +106,42 @@ async function browser() {
   };
 }
 
-test('the channel overlay reflects reported views independently of storage', async () => {
+test('reported views fill the tiles and each tile has its own channel menu', async () => {
   const app = await browser();
   const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
-  assert.ok(html.indexOf('class="video-wrap"') < html.indexOf('id="channelWrap"'));
-  assert.ok(html.indexOf('id="channelWrap"') < html.indexOf('id="sourceChoices"'));
-  assert.equal(app.element('channelWrap').classList.contains('hidden'), true);
+  assert.ok(html.indexOf('id="videoGrid"') < html.indexOf('id="sourceChoices"'));
+  assert.ok(html.includes('id="tileChannel"') && html.includes('id="tileOptions"'));
+  assert.equal((html.match(/class="video-wrap/g) || []).length, 6);
+  assert.equal(html.includes('id="channelWrap"'), false);
+
   app.route((url) => {
     if (url.searchParams.get('group') === 'Properties.Image.NbrOfViews') return 'root.Properties.Image.NbrOfViews=3';
     if (url.searchParams.get('group') === 'Image') return 'root.Image.I1.Name=Eingang\nroot.Image.I2.Enabled=no';
   });
   await app.loadChannels();
-  assert.deepEqual(app.element('channel').options.map((o) => o.textContent), ['channel.default {"n":1}', '2: Eingang']);
-  assert.equal(app.element('channelWrap').classList.contains('hidden'), false);
-  assert.match(app.element('channelLabel').textContent, /"n":3/);
+  // Three physical views, two enabled -> 2-tile layout with channels 1 and 2.
+  assert.equal(app.state.layoutSize, 2);
+  assert.equal(app.state.tiles[0].channel, 1);
+  assert.equal(app.state.tiles[1].channel, 2);
+  assert.equal(app.state.tiles[2].visible, false);
+  assert.equal(app.element('tile0').classList.contains('hidden'), false);
+  assert.equal(app.element('tile1').classList.contains('hidden'), false);
+  assert.equal(app.element('tile2').classList.contains('hidden'), true);
+  assert.match(app.element('tileLabel').textContent, /channel\.default/);
+  assert.equal(app.element('tileLabel2').textContent, 'Eingang');
+  assert.deepEqual(app.element('tileChannel').options.map((o) => o.textContent), [
+    'tile.empty', 'channel.default {"n":1}', '2: Eingang',
+  ]);
+  assert.equal(app.element('tileChannel2').value, '2');
+
+  app.element('tile1').events.pointerdown();
+  assert.equal(app.state.active, 1);
+  assert.equal(app.state.channel, 2);
+  assert.equal(app.element('tile1').classList.contains('active'), true);
+  assert.equal(app.element('tile0').classList.contains('active'), false);
 });
 
-test('overlapping event footage has its own visible track and opens by recording ID', async () => {
+test('events are yellow on the channel lane and open by recording ID', async () => {
   const app = await browser();
   const marker = fixtureTime + 19000;
   app.route(() => recordings(5,
@@ -131,17 +154,148 @@ test('overlapping event footage has its own visible track and opens by recording
   app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
   app.rectangles.length = 0;
   await app.refreshRecordings();
-  assert.equal(app.element('otherLegend').classList.contains('hidden'), false);
   const eventBar = app.rectangles.find((r) => r.color === '#f59e0b');
   const continuousBar = app.rectangles.find((r) => r.color === '#3b82f6');
-  const scheduleBar = app.rectangles.find((r) => r.color === '#a855f7');
-  assert.ok(continuousBar.y + continuousBar.h < eventBar.y);
-  assert.ok(eventBar.y + eventBar.h < scheduleBar.y);
+  assert.ok(eventBar && continuousBar);
+  // One lane per channel: events sit on top of the channel's blue recording.
+  assert.equal(eventBar.y, continuousBar.y);
+  assert.ok(eventBar.y >= 24);
   const ev = { isPrimary: true, button: 0, pointerId: 1, offsetX: eventBar.x + 1, offsetY: eventBar.y + 1 };
   const canvas = app.element('timeline');
   canvas.events.pointerdown(ev);
   canvas.events.pointerup(ev);
   assert.equal(app.state.pipeline.parameters[0], 'recordingid=evt');
+});
+
+test('visible channels get separate lanes and a timeline click seeks all tiles', async () => {
+  const app = await browser();
+  app.state.channelCount = 2;
+  app.state.channels = [{ camera: 1, name: 'K1' }, { camera: 2, name: 'K2' }];
+  app.state.sourceCatalog = ['1', '2'];
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.route(() => recordings(2,
+    recording('one', fixtureTime, fixtureTime + 60000, { source: '1' }),
+    recording('two', fixtureTime, fixtureTime + 60000, { source: '2' }),
+  ));
+  app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
+  app.rectangles.length = 0;
+  await app.refreshRecordings();
+  assert.equal(JSON.stringify(app.timelineLanes().map((lane) => lane.channel)), '[1,2]');
+  assert.equal(app.state.recordingsByChannel.size, 2);
+  const blues = app.rectangles.filter((r) => r.color === '#3b82f6');
+  assert.equal(new Set(blues.map((r) => r.y)).size, 2);
+
+  const canvas = app.element('timeline');
+  const x = 20;
+  const y = app.laneGeometry(1).y + 5;
+  canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: x, offsetY: y });
+  canvas.events.pointerup({ isPrimary: true, button: 0, pointerId: 1, offsetX: x, offsetY: y });
+  await tick();
+  await tick();
+  assert.match(app.state.tiles[0].pipeline.parameters[0], /^recordingid=one$/);
+  assert.match(app.state.tiles[1].pipeline.parameters[0], /^recordingid=two$/);
+});
+
+test('timeline lanes have export checkboxes that default on and enable with a selection', async () => {
+  const app = await browser();
+  app.state.channelCount = 2;
+  app.state.channels = [{ camera: 1 }, { camera: 2 }];
+  app.state.sourceCatalog = ['1', '2'];
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.route(() => recordings(2,
+    recording('one', fixtureTime, fixtureTime + 60000, { source: '1' }),
+    recording('two', fixtureTime, fixtureTime + 60000, { source: '2' }),
+  ));
+  app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
+  await app.refreshRecordings();
+  assert.equal(app.state.timelineCheckboxes.length, 2);
+  assert.equal(app.state.timelineCheckboxes.every(({ input }) => input.checked), true);
+  assert.equal(app.state.timelineCheckboxes.every(({ input }) => input.disabled), true);
+
+  app.state.selStart = fixtureTime;
+  app.state.selEnd = fixtureTime + 30000;
+  app.syncSelectionInputs();
+  assert.equal(app.state.timelineCheckboxes.every(({ input }) => !input.disabled), true);
+
+  const first = app.state.timelineCheckboxes[0];
+  first.input.checked = false;
+  first.input.events.change();
+  assert.equal(app.exportChecked(first.channel), false);
+});
+
+test('multi-channel export writes one file per selected channel and keeps links for the rest', async () => {
+  const app = await browser();
+  app.state.channelCount = 2;
+  app.state.channels = [{ camera: 1 }, { camera: 2 }];
+  app.state.sourceCatalog = ['1', '2'];
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.route(() => recordings(2,
+    recording('one', fixtureTime, fixtureTime + 60000, { source: '1' }),
+    recording('two', fixtureTime, fixtureTime + 60000, { source: '2' }),
+  ));
+  await app.doExport(fixtureTime, fixtureTime + 30000);
+  assert.equal(app.downloads.length, 1);
+  assert.match(app.downloads[0], /recordingid=one/);
+  assert.match(app.downloads[0], /_ch1/);
+  const links = app.element('expLinks').options;
+  assert.equal(links.length, 2);
+  assert.match(links[1].options[0].href, /recordingid=two/);
+  assert.match(links[1].options[0].href, /_ch2/);
+  assert.match(app.element('expInfo').textContent, /exp\.channelDone/);
+});
+
+test('per-tile audio restarts live with AAC and can be muted again', async () => {
+  const app = await browser();
+  const tile = app.state.tiles[0];
+  app.element('tileAudio').events.click();
+  assert.equal(tile.audio, true);
+  assert.ok(tile.pipeline.parameters.includes('audio=1'));
+  assert.ok(tile.pipeline.parameters.includes('audiocodec=aac'));
+  assert.equal(tile.video.muted, true); // muted until the new stream plays
+  app.element('video').events.playing();
+  assert.equal(tile.video.muted, false);
+  assert.equal(app.element('tileAudio').classList.contains('audio-on'), true);
+
+  app.element('tileAudio').events.click();
+  assert.equal(tile.audio, false);
+  assert.equal(tile.video.muted, true);
+  app.goLive();
+  assert.ok(app.state.pipeline.parameters.includes('audio=0'));
+});
+
+test('network status sums stream bitrates and pings the camera', async () => {
+  const app = await browser();
+  assert.equal(app.formatBitrate(2_500_000), '2.5 Mbit/s');
+  assert.equal(app.formatBitrate(850_000), '850 kbit/s');
+  app.state.tiles[0].pipeline.bitrate = 2_500_000;
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.state.tiles[1].pipeline = { bitrate: 1_500_000 };
+  assert.equal(app.totalBitrate(), 4_000_000);
+  app.updateBandwidth();
+  assert.match(app.element('netRate').textContent, /4\.0 Mbit\/s/);
+
+  app.requests.length = 0;
+  await app.updatePing();
+  assert.match(app.element('netPing').textContent, /net\.ping/);
+  assert.ok(app.requests.some((url) => url.pathname.endsWith('/ping.txt')));
+});
+
+test('recordings expose audio tracks and control the export audio option', async () => {
+  const app = await browser();
+  app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
+  app.route(() => recordings(1, recording('with-audio', fixtureTime, fixtureTime + 60000, {}, [xml('audio')])));
+  await app.refreshRecordings();
+  assert.equal(app.state.recordings[0].hasAudio, true);
+  assert.equal(app.element('expAudioHint').classList.contains('hidden'), true);
+
+  app.route(() => recordings(1, recording('silent', fixtureTime, fixtureTime + 60000)));
+  await app.refreshRecordings();
+  assert.equal(app.state.recordings[0].hasAudio, false);
+  assert.equal(app.element('expAudioHint').classList.contains('hidden'), false);
 });
 
 test('a late seek does not override returning to live', async () => {
@@ -206,31 +360,143 @@ test('switching channels during a seek keeps the target time but rejects the old
   assert.equal(app.state.startWall, time);
 });
 
-test('live badge and snapshot require active video; playback does not fetch a live JPEG', async () => {
+test('pipeline state is isolated per tile and the accessors follow the active tile', async () => {
+  const app = await browser();
+  const first = app.activeTile();
+  const second = app.state.tiles[1];
+  second.channel = 2;
+  second.visible = true;
+
+  const closed = [];
+  first.pipeline = { close: () => closed.push('first') };
+  second.pipeline = { close: () => closed.push('second') };
+  const firstGeneration = first.generation;
+  const secondGeneration = second.generation;
+  app.stopPipeline(second);
+  assert.deepEqual(closed, ['second']);
+  assert.equal(second.pipeline, null);
+  assert.ok(first.pipeline);
+  assert.equal(second.generation, secondGeneration + 1);
+  assert.equal(first.generation, firstGeneration);
+
+  first.mode = 'playback';
+  second.mode = 'live';
+  first.pendingSeek = 42;
+  assert.equal(app.state.mode, 'playback');
+  assert.equal(app.state.pendingSeek, 42);
+  app.state.active = 1;
+  assert.equal(app.state.mode, 'live');
+  assert.equal(app.state.pendingSeek, null);
+  assert.equal(app.state.channel, 2);
+  app.state.pendingSeek = 43;
+  assert.equal(second.pendingSeek, 43);
+  assert.equal(first.pendingSeek, 42);
+});
+
+test('layout and stream defaults follow channel count and view mode', async () => {
+  const app = await browser();
+  assert.equal(app.autoLayoutSize(), 1);
+  app.state.channels = [{ camera: 1 }, { camera: 2 }];
+  assert.equal(app.autoLayoutSize(), 2);
+  app.state.channels = [{ camera: 1 }, { camera: 2 }, { camera: 3 }];
+  assert.equal(app.autoLayoutSize(), 4);
+  app.state.channels = Array.from({ length: 6 }, (_, i) => ({ camera: i + 1 }));
+  assert.equal(app.autoLayoutSize(), 6);
+
+  app.state.streamProfiles = [
+    { name: 'low', parameters: 'resolution=640x360&bitrate=200' },
+    { name: 'high', parameters: 'resolution=1920x1080&bitrate=4000' },
+    { name: 'mid', parameters: 'resolution=1280x720&bitrate=1000' },
+    { name: 'unknown', parameters: 'fps=25' },
+  ];
+  assert.deepEqual(app.rankedProfiles().map((x) => x.profile.name), ['low', 'mid', 'high']);
+  const tile = app.state.tiles[0];
+  tile.profile = 'auto';
+  app.state.layoutSize = 1;
+  assert.equal(app.effectiveProfile(tile), 'high');
+  app.state.layoutSize = 4;
+  assert.equal(app.effectiveProfile(tile), 'low');
+  tile.profile = 'mid';
+  assert.equal(app.effectiveProfile(tile), 'mid');
+});
+
+test('a manual 4-tile layout keeps empty slots and allows a free channel choice', async () => {
+  const app = await browser();
+  app.state.channels = [{ camera: 1 }, { camera: 2 }, { camera: 3 }];
+  app.state.layout = '4';
+  app.applyLayout();
+  assert.equal(app.state.layoutSize, 4);
+  assert.equal(app.state.tiles[2].channel, 3);
+  assert.equal(app.state.tiles[3].channel, null);
+  assert.equal(app.state.tiles[3].visible, true);
+  assert.equal(app.element('tile3').classList.contains('empty'), true);
+  assert.equal(app.element('tileChannel4').options[0].textContent, 'tile.empty');
+
+  const select = app.element('tileChannel2');
+  select.value = '3';
+  select.events.change();
+  assert.equal(app.state.tiles[1].channel, 3);
+  assert.equal(app.state.tiles[1].channelTouched, true);
+  assert.match(app.element('tileLabel2').textContent, /channel\.default/);
+});
+
+test('the layout selector switches 1/2/4/6 and keeps the first six channels', async () => {
+  const app = await browser();
+  app.state.channels = Array.from({ length: 6 }, (_, i) => ({ camera: i + 1 }));
+  const select = app.element('layoutSelect');
+  select.value = '1';
+  select.events.change({ target: select });
+  assert.equal(app.state.layoutSize, 1);
+  assert.equal(app.state.tiles[1].visible, false);
+
+  select.value = '6';
+  select.events.change({ target: select });
+  assert.equal(app.state.layoutSize, 6);
+  assert.equal(app.state.tiles[5].visible, true);
+  assert.equal(app.state.tiles[5].channel, 6);
+
+  app.state.channels.push({ camera: 7 });
+  select.value = 'auto';
+  select.events.change({ target: select });
+  assert.equal(app.state.layoutSize, 6);
+  assert.equal(app.state.tiles[5].channel, 6);
+});
+
+test('snapshot uses the live JPEG endpoint and playback frames without a live JPEG', async () => {
   const app = await browser();
   assert.match(app.element('modeBadge').textContent, /connecting/);
   app.element('video').events.playing();
   assert.equal(app.element('modeBadge').textContent, 'badge.live');
-  // While live video plays there is nothing for the button to do.
+  // While live video plays there is nothing for the live button to do.
   assert.equal(app.element('btnLive').classList.contains('hidden'), true);
   assert.equal(app.element('liveSep').classList.contains('hidden'), true);
   app.element('btnSnapshot').events.click();
   assert.match(app.downloads[0], /\/axis-cgi\/jpg\/image.cgi/);
+
+  app.state.tiles[0].video.videoWidth = 640;
+  app.state.tiles[0].video.videoHeight = 360;
   app.route(() => recordings(1, recording('clip')));
   await app.playAt(fixtureTime + 1000);
   app.element('video').events.playing();
   assert.equal(app.element('btnLive').classList.contains('hidden'), false);
-  assert.equal(app.element('btnSnapshot').disabled, true);
+  assert.equal(app.element('btnSnapshot').disabled, false);
   app.element('btnSnapshot').events.click();
-  assert.equal(app.downloads.length, 1);
+  assert.equal(app.downloads.length, 2);
+  assert.match(app.downloads[1], /^data:image\/jpeg/);
+
+  const paused = app.element('btnPause');
+  paused.events.click();
+  assert.equal(app.element('btnSnapshot').disabled, false);
+  app.element('btnSnapshot').events.click();
+  assert.equal(app.downloads.length, 3);
+  assert.match(app.downloads[2], /^data:image\/jpeg/);
 });
 
-test('timeline messages are an overlay in the image and vanish when empty', async () => {
+test('timeline messages sit in the timeline panel and vanish when empty', async () => {
   const app = await browser();
   const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
   const status = app.element('timelineStatus');
-  assert.ok(html.indexOf('id="timelineStatus"') > html.indexOf('class="video-wrap"'));
-  assert.ok(html.indexOf('id="timelineStatus"') < html.indexOf('class="timeline-panel"'));
+  assert.ok(html.indexOf('id="timelineStatus"') > html.indexOf('class="timeline-panel"'));
   assert.equal(status.classList.contains('hidden'), false); // the startup fetch found no recordings
   app.state.viewStart = fixtureTime;
   app.state.viewEnd = fixtureTime + 60000;
@@ -490,6 +756,24 @@ test('continuous recording can be stopped and only the channel profile is remove
   assert.equal(app.element('recDisableRow').classList.contains('hidden'), true);
   await app.refreshActiveRecording();
   assert.equal(app.element('recEnableRow').classList.contains('hidden'), false);
+});
+
+test('continuous recording can be configured with AAC audio', async () => {
+  const app = await browser();
+  let options = '';
+  app.route((url) => {
+    if (url.pathname.endsWith('/disks/list.cgi')) return listDisks(xml('disk', { diskid: 'SD_DISK', status: 'OK' }));
+    if (url.pathname.endsWith('/addconfiguration.cgi')) {
+      options = url.searchParams.get('options');
+      return xml('root', {}, [xml('configure', { result: 'OK', profile: '1' })]);
+    }
+  });
+  await app.loadStorage();
+  app.element('recAudio').checked = true;
+  await app.enableContinuous();
+  assert.match(options, /videocodec=h264/);
+  assert.match(options, /audio=1/);
+  assert.match(options, /audiocodec=aac/);
 });
 
 test('stopping continuous recording does nothing when the confirmation is declined', async () => {

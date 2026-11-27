@@ -29,6 +29,10 @@
   const STORE = 'minivms.';       // preserve preferences on the same camera origin
 
   const state = {
+    layout: 'auto',              // 'auto' | 1 | 2 | 4 | 6
+    layoutSize: 1,               // resolved tile count
+    tiles: [],                   // one pipeline controller per tile slot
+    active: 0,
     mode: 'live',                // 'live' | 'playback' | 'paused'
     pipeline: null,
     generation: 0,               // guards against callbacks of old pipelines
@@ -41,7 +45,10 @@
     baseCt: null,                // video.currentTime at first frame (fallback)
     pausedAt: null,
     recordings: [],              // recordings of the selected channel
+    recordingsByChannel: new Map(),
     unassignedRecordings: [],
+    exportChannels: new Map(),   // channel -> export checkbox
+    timelineCheckboxes: [],      // { channel, input } for the left gutter
     viewStart: 0,
     viewEnd: 0,
     selStart: null,
@@ -55,6 +62,61 @@
     sourceCatalog: [],
     streamProfiles: [],
   };
+
+  // ---------------------------------------------------------------- Tiles
+
+  /**
+   * Per-tile pipeline state. Six slots exist in the DOM; only state.layoutSize
+   * of them are visible. Playback, retries and seeks stay identical per tile.
+   */
+  function createTile(index, channel = null) {
+    return {
+      id: index,
+      el: $(`tile${index}`),
+      video: $(index === 0 ? 'video' : `video${index + 1}`),
+      channel,
+      channelTouched: false,
+      visible: index === 0,
+      profile: 'auto',             // 'auto' or a stream profile name
+      resolution: '',              // optional resolution override
+      audio: false,                // audio track requested
+      muteUntilPlaying: false,     // unmute after the next playing event
+      lastFrame: null,             // canvas with the last visible frame (pause/snapshot)
+      pipeline: null,
+      generation: 0,
+      intent: null,
+      endingIntent: null,
+      streamTimer: null,
+      streamStatus: 'connecting',
+      pendingSeek: null,
+      manualRecording: null,
+      rec: null,
+      mode: 'live',
+      startWall: 0,
+      syncWall: null,
+      baseCt: null,
+      pausedAt: null,
+    };
+  }
+
+  const activeTile = () => state.tiles[state.active] || state.tiles[0];
+  const visibleTiles = () => state.tiles.filter((tile) => tile.visible && tile.channel != null);
+  const tileId = (tile, name) => (tile.id === 0 ? name : name + (tile.id + 1));
+
+  for (let i = 0; i < 6; i++) state.tiles.push(createTile(i, i === 0 ? 1 : null));
+
+  // Transitional accessors: existing call sites and tests read the active
+  // tile as state.*. The real state lives in state.tiles[state.active].
+  for (const key of ['channel', 'pipeline', 'generation', 'intent', 'endingIntent',
+    'streamTimer', 'streamStatus', 'pendingSeek', 'manualRecording', 'rec', 'mode',
+    'startWall', 'syncWall', 'baseCt', 'pausedAt']) {
+    Object.defineProperty(state, key, {
+      configurable: true,
+      enumerable: true,
+      get: () => activeTile()[key],
+      set: (value) => { activeTile()[key] = value; },
+    });
+  }
 
   // ---------------------------------------------------------------- Utils
 
@@ -117,8 +179,8 @@
     toastTimer = setTimeout(() => el.classList.add('hidden'), isError ? 6000 : 3000);
   }
 
-  function videoMsg(msg) {
-    const el = $('videoMsg');
+  function videoMsg(tile, msg) {
+    const el = $(tileId(tile, 'videoMsg'));
     if (!msg) { el.classList.add('hidden'); return; }
     el.textContent = msg;
     el.classList.remove('hidden');
@@ -169,6 +231,241 @@
 
   // ------------------------------------------------------------ Channels & streams
 
+  const multiChannel = () => state.channelCount > 1;
+
+  function autoLayoutSize() {
+    const n = state.channels.length || state.channelCount || 1;
+    return n <= 1 ? 1 : n === 2 ? 2 : n <= 4 ? 4 : 6;
+  }
+
+  const resolvedLayout = () => (state.layout === 'auto' ? autoLayoutSize() : Number(state.layout) || 1);
+
+  const channelOptionText = (c) =>
+    multiChannel() && c.name !== t('channel.default', { n: c.camera }) ? `${c.camera}: ${c.name}` : c.name;
+
+  function loadLayoutPreference() {
+    const saved = store.get('layout');
+    if (['auto', '1', '2', '4', '6'].includes(saved)) state.layout = saved;
+  }
+
+  function applyLayout() {
+    const size = resolvedLayout();
+    state.layoutSize = size;
+    $('videoGrid').className = `video-grid layout-${size}`;
+
+    for (const tile of state.tiles) {
+      const visible = tile.id < size;
+      if (tile.visible && !visible) {
+        tile.intent?.abort();
+        stopPipeline(tile);
+      }
+      tile.visible = visible;
+      tile.el.classList.toggle('hidden', !visible);
+      if (!visible) continue;
+      if (!tile.channelTouched) {
+        const next = state.channels[tile.id] ? state.channels[tile.id].camera : null;
+        if (next !== tile.channel) {
+          tile.channel = next;
+          loadTilePreferences(tile);
+        }
+      } else if (tile.channel != null && !state.channels.some((c) => c.camera === tile.channel)) {
+        tile.channel = null;
+        tile.channelTouched = false;
+      }
+    }
+
+    const active = state.tiles[state.active];
+    if (!active || !active.visible) {
+      setActiveTile(state.tiles.find((tile) => tile.visible) || state.tiles[0]);
+    }
+    state.tiles.forEach((tile) => {
+      tile.el.classList.toggle('active', tile.id === state.active);
+      renderTileMenu(tile);
+    });
+    $('layoutSelect').value = String(state.layout);
+    updateAllTileUi();
+    updateModeUi(activeTile());
+    resizeCanvas();
+  }
+
+  // ------------------------------------------------------------ Stream profiles
+
+  function profileParam(profile, key) {
+    try { return new URLSearchParams(profile.parameters || '').get(key); } catch (e) { return null; }
+  }
+
+  function profilePixels(profile) {
+    const m = /^(\d+)x(\d+)$/i.exec(profileParam(profile, 'resolution') || '');
+    return m ? Number(m[1]) * Number(m[2]) : null;
+  }
+
+  function profileBitrate(profile) {
+    const n = Number(profileParam(profile, 'bitrate'));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  /** Profiles with a usable resolution, smallest first. */
+  function rankedProfiles() {
+    return state.streamProfiles
+      .map((profile, index) => ({ profile, index, pixels: profilePixels(profile), bitrate: profileBitrate(profile) }))
+      .filter((p) => p.pixels != null)
+      .sort((a, b) => a.pixels - b.pixels || a.bitrate - b.bitrate || a.index - b.index);
+  }
+
+  /** Single view gets the largest resolvable profile, multi view the smallest. */
+  function autoProfileName() {
+    const ranked = rankedProfiles();
+    if (!ranked.length) return '';
+    return (state.layoutSize > 1 ? ranked[0] : ranked[ranked.length - 1]).profile.name;
+  }
+
+  function effectiveProfile(tile) {
+    return tile.profile && tile.profile !== 'auto' && state.streamProfiles.some((p) => p.name === tile.profile)
+      ? tile.profile
+      : autoProfileName();
+  }
+
+  function loadTilePreferences(tile) {
+    tile.profile = 'auto';
+    tile.resolution = '';
+    if (tile.channel == null) return;
+    const savedProfile = store.get(`stream.${tile.channel}`);
+    if (savedProfile && (savedProfile === 'auto' || state.streamProfiles.some((p) => p.name === savedProfile))) {
+      tile.profile = savedProfile;
+    }
+    tile.resolution = store.get(`resolution.${tile.channel}`) || '';
+    tile.audio = store.get(`audio.${tile.channel}`) === '1';
+    tile.muteUntilPlaying = tile.audio;
+    applyTileMuted(tile);
+  }
+
+  function saveTilePreferences(tile) {
+    if (tile.channel == null) return;
+    store.set(`stream.${tile.channel}`, tile.profile || 'auto');
+    store.set(`resolution.${tile.channel}`, tile.resolution || '');
+  }
+
+  function renderTileMenu(tile) {
+    const chSel = $(tileId(tile, 'tileChannel'));
+    chSel.replaceChildren();
+    if (state.layoutSize > 1) {
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = t('tile.empty');
+      chSel.appendChild(empty);
+    }
+    for (const c of state.channels) {
+      const o = document.createElement('option');
+      o.value = String(c.camera);
+      o.textContent = channelOptionText(c);
+      chSel.appendChild(o);
+    }
+    chSel.value = tile.channel == null ? '' : String(tile.channel);
+
+    const streamSel = $(tileId(tile, 'tileStream'));
+    streamSel.replaceChildren();
+    const auto = document.createElement('option');
+    auto.value = '';
+    auto.textContent = autoProfileName()
+      ? `${t('tile.stream.auto')} – ${autoProfileName()}`
+      : t('tile.stream.auto');
+    streamSel.appendChild(auto);
+    for (const p of state.streamProfiles) {
+      const o = document.createElement('option');
+      o.value = p.name;
+      o.textContent = p.name;
+      o.title = [p.description, p.parameters, profilePixels(p) == null ? t('tile.stream.unknown') : '']
+        .filter(Boolean).join(' – ');
+      streamSel.appendChild(o);
+    }
+    streamSel.value = tile.profile && tile.profile !== 'auto' ? tile.profile : '';
+    streamSel.disabled = !state.streamProfiles.length || tile.channel == null;
+
+    const resSel = $(tileId(tile, 'tileResolution'));
+    resSel.value = tile.resolution || '';
+    resSel.disabled = tile.channel == null;
+
+    updateTileLabel(tile);
+    updateTileAudio(tile);
+  }
+
+  function wireTile(tile) {
+    tile.el.addEventListener('pointerdown', () => setActiveTile(tile));
+    tile.video.addEventListener('playing', () => onTilePlaying(tile));
+
+    const chSel = $(tileId(tile, 'tileChannel'));
+    chSel.addEventListener('change', () => setTileChannel(tile, chSel.value ? Number(chSel.value) : null));
+
+    const streamSel = $(tileId(tile, 'tileStream'));
+    streamSel.addEventListener('change', () => {
+      tile.profile = streamSel.value || 'auto';
+      saveTilePreferences(tile);
+      renderTileMenu(tile);
+      restartTileIfLive(tile);
+    });
+
+    const resSel = $(tileId(tile, 'tileResolution'));
+    resSel.addEventListener('change', () => {
+      tile.resolution = resSel.value || '';
+      saveTilePreferences(tile);
+      renderTileMenu(tile);
+      restartTileIfLive(tile);
+    });
+
+    const audioBtn = $(tileId(tile, 'tileAudio'));
+    audioBtn.addEventListener('click', () => setTileAudio(tile, !tile.audio));
+    updateTileAudio(tile);
+    applyTileMuted(tile);
+  }
+
+  function restartTileIfLive(tile) {
+    if (!tile.visible || tile.channel == null) return;
+    if (tile.mode === 'live' && tile.pendingSeek == null) goLive(true, tile);
+  }
+
+  function setTileChannel(tile, cam) {
+    if (cam != null && !state.channels.some((c) => c.camera === cam) && !(cam >= 1 && cam <= state.channelCount)) return;
+    if (cam === tile.channel) { renderTileMenu(tile); return; }
+    const wall = tile.pendingSeek ?? currentWall(tile);
+    const wasLive = tile.mode === 'live' && tile.pendingSeek == null;
+    const prev = tile.channel;
+    tile.channel = cam;
+    tile.channelTouched = true;
+    loadTilePreferences(tile);
+    renderTileMenu(tile);
+    if (tile === activeTile() && cam != null) store.set('channel', String(cam));
+
+    if (cam == null) {
+      tile.intent?.abort();
+      stopPipeline(tile);
+      tile.mode = 'paused';
+      tile.rec = null;
+      tile.pausedAt = wall;
+      setStreamStatus(tile, 'idle', t('tile.empty'));
+    } else if (wasLive) {
+      goLive(true, tile);
+    } else {
+      playAt(wall, { clearOldStream: true, tile });
+    }
+
+    updateAllTileUi();
+    updateModeUi(activeTile());
+    if (tile === activeTile()) {
+      document.dispatchEvent(new CustomEvent('microvms:channel', { detail: { channel: cam, previous: prev } }));
+      state.recordings = [];
+      state.unassignedRecordings = [];
+      draw();
+      refreshActiveRecording();
+      renderRecordingConfig();
+    }
+    if (tile.visible) refreshRecordings();
+  }
+
+  /** Legacy entry point: change the channel of the active tile. */
+  function setChannel(cam) {
+    setTileChannel(activeTile(), cam);
+  }
+
   /**
    * Video channels (multi-sensor cameras, encoders, view areas, quad views).
    * Image.I<n> corresponds to camera=<n+1>.
@@ -193,25 +490,13 @@
     state.channels = channels;
     state.channelCount = Math.max(1, count);
 
+    applyLayout();
     const saved = parseInt(store.get('channel'), 10);
-    state.channel = channels.some((c) => c.camera === saved) ? saved : channels[0].camera;
-
-    const sel = $('channel');
-    sel.replaceChildren();
-    for (const c of channels) {
-      const o = document.createElement('option');
-      o.value = String(c.camera);
-      o.textContent = channels.length > 1 && c.name !== t('channel.default', { n: c.camera }) ? `${c.camera}: ${c.name}` : c.name;
-      sel.appendChild(o);
-    }
-    sel.value = String(state.channel);
-    sel.disabled = channels.length < 2;
-    $('channelLabel').textContent = t('ctl.views', { n: state.channelCount });
-    $('channelWrap').classList.toggle('hidden', !multiChannel());
+    const wanted = channels.some((c) => c.camera === saved) ? saved : channels[0].camera;
+    const target = state.tiles.find((tile) => tile.visible && tile.channel === wanted);
+    if (target) setActiveTile(target);
+    $('layoutSelect').value = String(state.layout);
   }
-
-  const multiChannel = () => state.channelCount > 1;
-  const channelName = (cam = state.channel) => (state.channels.find((c) => c.camera === cam) || {}).name || t('channel.default', { n: cam });
 
   async function loadStreamProfiles() {
     try {
@@ -223,39 +508,17 @@
       });
       if (!res.ok) return;
       const j = await res.json();
-      state.streamProfiles = (j.data && j.data.streamProfile) || [];
+      const list = j.data && j.data.streamProfile;
+      state.streamProfiles = Array.isArray(list) ? list : [];
     } catch (e) { state.streamProfiles = []; }
-    const sel = $('streamProfile');
-    while (sel.options.length > 1) sel.remove(1);
-    for (const p of state.streamProfiles) {
-      const o = document.createElement('option');
-      o.value = p.name;
-      o.textContent = p.name;
-      o.title = [p.description, p.parameters].filter(Boolean).join(' – ');
-      sel.appendChild(o);
+    for (const tile of state.tiles) {
+      loadTilePreferences(tile);
+      renderTileMenu(tile);
     }
-    const saved = store.get('streamprofile');
-    if (saved && state.streamProfiles.some((p) => p.name === saved)) sel.value = saved;
-    $('streamWrap').classList.toggle('hidden', !state.streamProfiles.length);
   }
 
-  function setChannel(cam) {
-    if (cam === state.channel) return;
-    const wall = state.pendingSeek ?? currentWall();
-    const wasLive = state.mode === 'live' && state.pendingSeek == null;
-    const prev = state.channel;
-    state.channel = cam;
-    store.set('channel', String(cam));
-    document.dispatchEvent(new CustomEvent('microvms:channel', { detail: { channel: cam, previous: prev } }));
-    state.recordings = [];
-    state.unassignedRecordings = [];
-    draw();
-    refreshRecordings();
-    refreshActiveRecording();
-    renderRecordingConfig();
-    if (wasLive) goLive();
-    else playAt(wall, { clearOldStream: true });
-  }
+  const channelName = (cam = state.channel) => (state.channels.find((c) => c.camera === cam) || {}).name || t('channel.default', { n: cam });
+
 
   // ------------------------------------------------------------ VAPIX recordings
 
@@ -286,6 +549,7 @@
         disk: el.getAttribute('diskid'),
         start, stop, status, source,
         type: recordingType(el),
+        hasAudio: Boolean(el.getElementsByTagName('audio')[0]),
       };
     });
   }
@@ -365,62 +629,65 @@
 
   // ------------------------------------------------------------ Pipeline
 
-  let playbackIntent = null;
-  let endingIntent = null;
-  let streamTimer = null;
-
-  function newPlaybackIntent() {
-    playbackIntent?.abort();
-    playbackIntent = new AbortController();
-    state.pendingSeek = null;
-    state.manualRecording = null;
-    $('sourceChoices').classList.add('hidden');
-    $('sourceChoiceList').replaceChildren();
-    return playbackIntent;
+  function newPlaybackIntent(tile = activeTile()) {
+    tile.intent?.abort();
+    tile.intent = new AbortController();
+    tile.pendingSeek = null;
+    tile.manualRecording = null;
+    if (tile === activeTile()) {
+      $('sourceChoices').classList.add('hidden');
+      $('sourceChoiceList').replaceChildren();
+    }
+    return tile.intent;
   }
 
-  const isCurrentIntent = (intent) => playbackIntent === intent && !intent.signal.aborted;
+  const isCurrentIntent = (intent, tile = activeTile()) =>
+    tile.intent === intent && !intent.signal.aborted;
 
-  function stopPipeline() {
-    state.generation++;
-    clearTimeout(streamTimer);
-    if (state.pipeline) {
-      try { state.pipeline.close(); } catch (e) { /* ignore */ }
-      state.pipeline = null;
+  function stopPipeline(tile = activeTile()) {
+    tile.generation++;
+    clearTimeout(tile.streamTimer);
+    tile.streamTimer = null;
+    if (tile.pipeline) {
+      try { tile.pipeline.close(); } catch (e) { /* ignore */ }
+      tile.pipeline = null;
     }
   }
 
-  function setStreamStatus(status, msg = '') {
-    state.streamStatus = status;
-    videoMsg(state.pendingSeek == null ? msg : t('video.seeking'));
-    updateModeUi();
+  function setStreamStatus(tile, status, msg = '') {
+    tile.streamStatus = status;
+    if (tile === activeTile()) {
+      videoMsg(tile, tile.pendingSeek == null ? msg : t('video.seeking'));
+    }
+    updateModeUi(tile);
   }
 
-  function startPipeline(parameters, offsetSec, retryLive = true) {
-    stopPipeline();
-    const gen = state.generation;
-    const video = $('video');
-    state.syncWall = null;
-    state.baseCt = null;
-    setStreamStatus('connecting', t('video.connecting'));
-    if (!MSL?.Html5VideoPipeline) { setStreamStatus('error', t('video.libMissing')); return; }
+  function startPipeline(tile, parameters, offsetSec, retryLive = true) {
+    stopPipeline(tile);
+    const gen = tile.generation;
+    const video = tile.video;
+    tile.syncWall = null;
+    tile.baseCt = null;
+    tile.lastFrame = null;
+    setStreamStatus(tile, 'connecting', t('video.connecting'));
+    if (!MSL?.Html5VideoPipeline) { setStreamStatus(tile, 'error', t('video.libMissing')); return; }
     const fail = (msg, reconnect = false) => {
-      if (gen !== state.generation) return;
-      const lastWall = currentWall();
-      stopPipeline();
-      if (reconnect && (retryLive || state.streamStatus === 'playing') && state.mode === 'live' && state.pendingSeek == null) {
-        setStreamStatus('connecting', t('video.reconnect'));
-        const intent = playbackIntent;
-        const closedGen = state.generation;
-        streamTimer = setTimeout(() => {
-          if (state.generation === closedGen && isCurrentIntent(intent)) goLive(false);
+      if (gen !== tile.generation) return;
+      const lastWall = currentWall(tile);
+      stopPipeline(tile);
+      if (reconnect && (retryLive || tile.streamStatus === 'playing') && tile.mode === 'live' && tile.pendingSeek == null) {
+        setStreamStatus(tile, 'connecting', t('video.reconnect'));
+        const intent = tile.intent;
+        const closedGen = tile.generation;
+        tile.streamTimer = setTimeout(() => {
+          if (tile.generation === closedGen && isCurrentIntent(intent, tile)) goLive(false, tile);
         }, 2000);
       } else {
-        if (state.mode === 'playback') {
-          state.startWall = lastWall;
-          state.syncWall = state.baseCt = null;
+        if (tile.mode === 'playback') {
+          tile.startWall = lastWall;
+          tile.syncWall = tile.baseCt = null;
         }
-        setStreamStatus('error', msg);
+        setStreamStatus(tile, 'error', msg);
       }
     };
     let pipeline;
@@ -430,18 +697,18 @@
         rtsp: { parameters },        // rtsp://<camera>/axis-media/media.amp?...
         mediaElement: video,
       });
-      state.pipeline = pipeline;
+      tile.pipeline = pipeline;
     } catch (err) {
       fail(t('video.connectFailed', { msg: err.message }));
       return;
     }
-    streamTimer = setTimeout(() => fail(t('video.timeout')), 15000);
+    tile.streamTimer = setTimeout(() => fail(t('video.timeout')), 15000);
 
-    pipeline.onSync = (ntp) => { if (gen === state.generation) state.syncWall = ntp; };
+    pipeline.onSync = (ntp) => { if (gen === tile.generation) tile.syncWall = ntp; };
     pipeline.onServerClose = () => {
-      if (gen !== state.generation) return;
-      if (state.mode === 'playback' && state.pendingSeek == null && state.rec?.stop != null && Math.abs(currentWall() - state.rec.stop) < 2000) {
-        onRecordingEnded();
+      if (gen !== tile.generation) return;
+      if (tile.mode === 'playback' && tile.pendingSeek == null && tile.rec?.stop != null && Math.abs(currentWall(tile) - tile.rec.stop) < 2000) {
+        onRecordingEnded(tile);
       } else {
         fail(t('video.disconnected'), true);
       }
@@ -450,13 +717,13 @@
       fail(t('video.rtspError', { msg: err.message || err }));
     };
     pipeline.rtsp.onRtcp = (rtcp) => {
-      if (gen !== state.generation) return;
-      if (MSL.isRtcpBye(rtcp) && state.mode === 'playback') onRecordingEnded();
+      if (gen !== tile.generation) return;
+      if (MSL.isRtcpBye(rtcp) && tile.mode === 'playback') onRecordingEnded(tile);
     };
 
     pipeline.ready
       .then(() => {
-        if (gen !== state.generation) return;
+        if (gen !== tile.generation) return;
         pipeline.rtsp.play(offsetSec || 0);
         return video.play();
       })
@@ -465,44 +732,53 @@
       });
   }
 
-  function liveParameters() {
-    const params = [`camera=${state.channel}`];
-    const profile = $('streamProfile').value;
+  const audioParams = (tile) => (audioEnabled(tile) ? ['audio=1', 'audiocodec=aac'] : ['audio=0']);
+
+  function liveParameters(tile = activeTile()) {
+    const params = [`camera=${tile.channel}`];
+    const profile = effectiveProfile(tile);
     // Profile first, explicit values after it override it ("last value wins")
     if (profile) params.push(`streamprofile=${encodeURIComponent(profile)}`);
-    params.push('videocodec=h264', 'audio=0');
-    const res = $('resolution').value;
-    if (res) params.push(`resolution=${res}`);
+    params.push('videocodec=h264', ...audioParams(tile));
+    if (tile.resolution) params.push(`resolution=${tile.resolution}`);
     return params;
   }
 
-  function goLive(retryLive = true) {
-    newPlaybackIntent();
-    state.mode = 'live';
-    state.rec = null;
-    state.pausedAt = null;
-    startPipeline(liveParameters(), 0, retryLive);
+  function goLive(retryLive = true, tile = activeTile()) {
+    if (tile.channel == null) {
+      stopPipeline(tile);
+      tile.mode = 'paused';
+      tile.rec = null;
+      setStreamStatus(tile, 'idle', t('tile.empty'));
+      return;
+    }
+    newPlaybackIntent(tile);
+    tile.mode = 'live';
+    tile.rec = null;
+    tile.pausedAt = null;
+    startPipeline(tile, liveParameters(tile), 0, retryLive);
   }
 
-  function holdAt(time, msg) {
-    stopPipeline();
-    state.mode = 'paused';
-    state.rec = null;
-    state.pausedAt = time;
-    setStreamStatus('idle', msg);
+  function holdAt(tile, time, msg) {
+    stopPipeline(tile);
+    tile.mode = 'paused';
+    tile.rec = null;
+    tile.pausedAt = time;
+    setStreamStatus(tile, 'idle', msg);
   }
 
-  function startRecording(rec, time) {
-    state.mode = 'playback';
-    state.rec = rec;
-    state.startWall = time;
-    state.pausedAt = null;
+  function startRecording(tile, rec, time) {
+    tile.mode = 'playback';
+    tile.rec = rec;
+    tile.startWall = time;
+    tile.pausedAt = null;
     $('jumpTime').value = toLocalInput(time);
-    startPipeline([`recordingid=${encodeURIComponent(rec.id)}`, 'audio=0'], Math.max(0, (time - rec.start) / 1000));
+    startPipeline(tile, [`recordingid=${encodeURIComponent(rec.id)}`, ...audioParams(tile)],
+      Math.max(0, (time - rec.start) / 1000));
   }
 
-  function offerRecordings(intent, time, choices) {
-    holdAt(time, t('video.chooseSource'));
+  function offerRecordings(tile, intent, time, choices) {
+    holdAt(tile, time, t('video.chooseSource'));
     const list = $('sourceChoiceList');
     for (const [i, rec] of choices.slice(0, 12).entries()) {
       const button = document.createElement('button');
@@ -511,10 +787,10 @@
         n: i + 1, when: fmtDateTime(rec.start), source: rec.source || t('video.sourceMissing'),
       });
       button.addEventListener('click', () => {
-        if (!isCurrentIntent(intent)) return;
-        newPlaybackIntent();
-        state.manualRecording = rec;
-        startRecording(rec, Math.max(rec.start, time));
+        if (!isCurrentIntent(intent, tile)) return;
+        newPlaybackIntent(tile);
+        tile.manualRecording = rec;
+        startRecording(tile, rec, Math.max(rec.start, time));
       });
       list.appendChild(button);
     }
@@ -522,142 +798,289 @@
     $('sourceChoices').classList.remove('hidden');
   }
 
-  async function playAt(time, { clearOldStream = false, reuseManual = false, preferUnassigned = false } = {}) {
+  async function playAt(time, { clearOldStream = false, reuseManual = false, preferUnassigned = false, tile = activeTile() } = {}) {
     if (!Number.isFinite(time)) return;
-    const manual = reuseManual ? state.manualRecording : null;
+    const manual = reuseManual ? tile.manualRecording : null;
     if (manual && manual.start <= time && time < recStop(manual)) {
-      newPlaybackIntent();
-      state.manualRecording = manual;
-      startRecording(manual, time);
+      newPlaybackIntent(tile);
+      tile.manualRecording = manual;
+      startRecording(tile, manual, time);
       return;
     }
-    if (time >= Date.now() - LIVE_THRESHOLD) { goLive(); return; }
-    const intent = newPlaybackIntent();
-    const channel = state.channel;
-    if (clearOldStream) stopPipeline();
-    state.pendingSeek = time;
-    videoMsg(t('video.seeking'));
-    updateModeUi();
+    if (time >= Date.now() - LIVE_THRESHOLD) { goLive(true, tile); return; }
+    const intent = newPlaybackIntent(tile);
+    const channel = tile.channel;
+    if (clearOldStream) stopPipeline(tile);
+    tile.pendingSeek = time;
+    if (tile === activeTile()) videoMsg(tile, t('video.seeking'));
+    updateModeUi(tile);
     let result;
     try {
       result = await findRecordingAtOrAfter(time, { channel, signal: intent.signal, preferUnassigned });
     } catch (e) {
-      if (!isCurrentIntent(intent)) return;
-      state.pendingSeek = null;
-      holdAt(time, t('toast.recListFailed', { msg: e.message }));
+      if (!isCurrentIntent(intent, tile)) return;
+      tile.pendingSeek = null;
+      holdAt(tile, time, t('toast.recListFailed', { msg: e.message }));
       return;
     }
-    if (!isCurrentIntent(intent)) return;
-    state.pendingSeek = null;
-    if (result.choices) { offerRecordings(intent, time, result.choices); return; }
+    if (!isCurrentIntent(intent, tile)) return;
+    tile.pendingSeek = null;
+    if (result.choices) { offerRecordings(tile, intent, time, result.choices); return; }
     const { rec } = result;
     if (!rec) {
-      holdAt(time, t('video.noRecordingFrom', { when: fmtDateTime(time) }));
+      holdAt(tile, time, t('video.noRecordingFrom', { when: fmtDateTime(time) }));
       return;
     }
     if (rec.start > time) {
       toast(t('toast.jumpTo', { time: fmtTime(rec.start) }));
       time = rec.start;
     }
-    startRecording(rec, time);
+    startRecording(tile, rec, time);
   }
 
-  async function onRecordingEnded() {
-    const intent = playbackIntent;
-    const rec = state.rec;
-    if (!rec || state.mode !== 'playback' || state.pendingSeek != null || endingIntent === intent) return;
-    const end = rec.stop ?? currentWall();
-    if (state.manualRecording) { holdAt(end, t('video.endOfRecording')); return; }
-    endingIntent = intent;
-    const channel = state.channel;
+  async function onRecordingEnded(tile = activeTile()) {
+    const intent = tile.intent;
+    const rec = tile.rec;
+    if (!rec || tile.mode !== 'playback' || tile.pendingSeek != null || tile.endingIntent === intent) return;
+    const end = rec.stop ?? currentWall(tile);
+    if (tile.manualRecording) { holdAt(tile, end, t('video.endOfRecording')); return; }
+    tile.endingIntent = intent;
+    const channel = tile.channel;
     try {
       const { rec: next, choices } = await findRecordingAtOrAfter(end, { channel, signal: intent.signal }, rec);
-      if (!isCurrentIntent(intent)) return;
-      if (next) startRecording(next, Math.max(next.start, end));
-      else if (choices) offerRecordings(intent, end, choices);
-      else holdAt(end, t('video.endOfRecording'));
+      if (!isCurrentIntent(intent, tile)) return;
+      if (next) startRecording(tile, next, Math.max(next.start, end));
+      else if (choices) offerRecordings(tile, intent, end, choices);
+      else holdAt(tile, end, t('video.endOfRecording'));
     } catch (e) {
-      if (isCurrentIntent(intent)) holdAt(end, t('toast.recListFailed', { msg: e.message }));
+      if (isCurrentIntent(intent, tile)) holdAt(tile, end, t('toast.recListFailed', { msg: e.message }));
     } finally {
-      if (endingIntent === intent) endingIntent = null;
+      if (tile.endingIntent === intent) tile.endingIntent = null;
     }
   }
 
   /** Point in time currently shown (wall clock, ms). */
-  function currentWall() {
-    if (state.mode === 'live') return Date.now();
-    if (state.mode === 'paused') return state.pausedAt != null ? state.pausedAt : Date.now();
-    const ct = $('video').currentTime || 0;
+  function currentWall(tile = activeTile()) {
+    if (tile.mode === 'live') return Date.now();
+    if (tile.mode === 'paused') return tile.pausedAt != null ? tile.pausedAt : Date.now();
+    const ct = tile.video.currentTime || 0;
     // onSync gives the NTP time of media time 0; sanity check in case the
     // device does not send the original time for playback.
-    if (state.syncWall != null && Math.abs(state.syncWall - state.startWall) < 5 * MIN) {
-      return state.syncWall + ct * 1000;
+    if (tile.syncWall != null && Math.abs(tile.syncWall - tile.startWall) < 5 * MIN) {
+      return tile.syncWall + ct * 1000;
     }
-    if (state.baseCt == null) return state.startWall;
-    return state.startWall + (ct - state.baseCt) * 1000;
+    if (tile.baseCt == null) return tile.startWall;
+    return tile.startWall + (ct - tile.baseCt) * 1000;
   }
 
-  $('video').addEventListener('playing', () => {
-    if (!state.pipeline) return;
-    clearTimeout(streamTimer);
-    if (state.baseCt == null) state.baseCt = $('video').currentTime || 0;
-    setStreamStatus('playing');
-  });
+  function onTilePlaying(tile) {
+    if (!tile.pipeline) return;
+    clearTimeout(tile.streamTimer);
+    tile.streamTimer = null;
+    tile.muteUntilPlaying = false;
+    applyTileMuted(tile);
+    if (tile.baseCt == null) tile.baseCt = tile.video.currentTime || 0;
+    setStreamStatus(tile, 'playing');
+  }
 
   /**
    * Jump back from the time currently on screen. From live view the target
    * must be clearly before "now", otherwise playAt() would just go live again.
    */
-  function skipBack(seconds) {
-    const live = state.mode === 'live' && state.pendingSeek == null;
-    const from = state.pendingSeek ?? currentWall();
+  function skipBack(seconds, tile = activeTile()) {
+    const live = tile.mode === 'live' && tile.pendingSeek == null;
+    const from = tile.pendingSeek ?? currentWall(tile);
     const target = from - seconds;
-    playAt(live ? Math.min(target, Date.now() - LIVE_THRESHOLD - 1000) : target, { reuseManual: true });
+    playAt(live ? Math.min(target, Date.now() - LIVE_THRESHOLD - 1000) : target,
+      { reuseManual: true, tile });
   }
 
-  function togglePause() {
-    if (state.pendingSeek != null) {
-      const time = state.pendingSeek;
-      newPlaybackIntent();
-      holdAt(time, '');
+  function pauseTile(tile = activeTile()) {
+    if (!tile.visible || tile.channel == null) return;
+    if (tile.pendingSeek != null) {
+      const time = tile.pendingSeek;
+      newPlaybackIntent(tile);
+      holdAt(tile, time, '');
       return;
     }
-    if (state.mode === 'paused') {
-      if (state.pausedAt != null) playAt(state.pausedAt, { reuseManual: true }); else goLive();
-      return;
+    if (tile.mode === 'paused') return;
+    const time = currentWall(tile);
+    const manual = tile.manualRecording;
+    newPlaybackIntent(tile);
+    tile.manualRecording = manual;
+    tile.video.pause();
+    captureTileFrame(tile);
+    holdAt(tile, time, '');
+  }
+
+  function resumeTile(tile = activeTile()) {
+    if (!tile.visible || tile.channel == null || tile.mode !== 'paused') return;
+    if (tile.pausedAt != null) playAt(tile.pausedAt, { reuseManual: true, tile });
+    else goLive(true, tile);
+  }
+
+  function togglePause(tile = activeTile()) {
+    if (tile.mode === 'paused') resumeTile(tile);
+    else pauseTile(tile);
+  }
+
+  function goLiveAll() {
+    for (const tile of visibleTiles()) goLive(true, tile);
+  }
+
+  function playAtAll(time) {
+    if (!Number.isFinite(time)) return;
+    for (const tile of visibleTiles()) playAt(time, { tile });
+  }
+
+  function skipBackAll(seconds) {
+    for (const tile of visibleTiles()) skipBack(seconds, tile);
+  }
+
+  function skipForwardAll(seconds) {
+    for (const tile of visibleTiles()) {
+      playAt((tile.pendingSeek ?? currentWall(tile)) + seconds, { reuseManual: true, tile });
     }
-    const time = currentWall();
-    const manual = state.manualRecording;
-    newPlaybackIntent();
-    state.manualRecording = manual;
-    $('video').pause();
-    holdAt(time, '');
+  }
+
+  function togglePauseAll() {
+    const tiles = visibleTiles();
+    if (!tiles.length) return;
+    if (tiles.every((tile) => tile.mode === 'paused' && tile.pendingSeek == null)) {
+      tiles.forEach((tile) => resumeTile(tile));
+    } else {
+      tiles.forEach((tile) => pauseTile(tile));
+    }
+  }
+
+  function retryPlaybackAll() {
+    for (const tile of visibleTiles()) {
+      if (tile.mode === 'playback' && tile.streamStatus === 'error' && tile.pendingSeek == null) {
+        playAt(currentWall(tile), { reuseManual: true, tile });
+      }
+    }
+  }
+
+  function updateTileLabel(tile) {
+    const label = $(tileId(tile, 'tileLabel'));
+    const empty = tile.channel == null;
+    tile.el.classList.toggle('empty', empty);
+    label.textContent = empty ? t('tile.empty') : channelName(tile.channel);
+    label.classList.toggle('hidden', !multiChannel() && state.layoutSize === 1);
+  }
+
+  function updateTileBadge(tile) {
+    const badge = $(tileId(tile, 'modeBadge'));
+    let key;
+    if (tile.channel == null) {
+      key = 'empty';
+    } else {
+      const seeking = tile.pendingSeek != null;
+      const live = tile.mode === 'live' && !seeking;
+      const playing = tile.streamStatus === 'playing';
+      const paused = tile.mode === 'paused' && !seeking;
+      key = seeking ? 'seeking' : paused ? 'paused' : !playing ? tile.streamStatus : tile.mode;
+    }
+    badge.className = `badge ${key}`;
+    badge.textContent = t(`badge.${key}`);
+  }
+
+  let audioUnlocked = false;
+  const AAC_MIME = 'audio/mp4; codecs="mp4a.40.2"';
+
+  function audioSupported() {
+    return typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported
+      || MediaSource.isTypeSupported(AAC_MIME);
+  }
+
+  const audioEnabled = (tile) => tile.audio && audioSupported();
+
+  function applyTileMuted(tile) {
+    tile.video.muted = !audioEnabled(tile) || !audioUnlocked || tile.muteUntilPlaying;
+  }
+
+  function updateTileAudio(tile) {
+    const btn = $(tileId(tile, 'tileAudio'));
+    const use = $(tileId(tile, 'tileAudioIcon'));
+    const supported = audioSupported();
+    const on = audioEnabled(tile);
+    btn.disabled = tile.channel == null || !supported;
+    btn.classList.toggle('audio-on', on);
+    btn.setAttribute('aria-pressed', String(on));
+    btn.title = t(!supported ? 'tile.audio.unavailable' : on ? 'tile.audio.on' : 'tile.audio.off');
+    use.setAttribute('href', on ? '#ic-speaker' : '#ic-speaker-off');
+  }
+
+  function setTileAudio(tile, on) {
+    if (tile.channel == null) return;
+    if (on && !audioSupported()) { toast(t('tile.audio.unavailable'), true); return; }
+    audioUnlocked = true;
+    tile.audio = on;
+    tile.muteUntilPlaying = on;
+    store.set(`audio.${tile.channel}`, on ? '1' : '0');
+    applyTileMuted(tile);
+    updateTileAudio(tile);
+    if (!tile.visible) return;
+    if (on && tile.mode === 'live' && tile.pendingSeek == null) goLive(true, tile);
+    else if (on && tile.mode === 'playback') playAt(currentWall(tile), { reuseManual: true, tile });
+  }
+
+  function updateAllTileUi() {
+    for (const tile of state.tiles) {
+      updateTileLabel(tile);
+      updateTileBadge(tile);
+      updateTileAudio(tile);
+    }
+  }
+
+  function setActiveTile(tile) {
+    if (!tile || !tile.visible) return;
+    const prev = activeTile().channel;
+    const changed = state.active !== tile.id || prev !== tile.channel;
+    state.active = tile.id;
+    state.tiles.forEach((t) => t.el.classList.toggle('active', t === tile));
+    updateModeUi(tile);
+    if (!changed) return;
+    if (tile.channel != null) store.set('channel', String(tile.channel));
+    document.dispatchEvent(new CustomEvent('microvms:channel', { detail: { channel: tile.channel, previous: prev } }));
+    const data = tile.channel == null ? null : state.recordingsByChannel.get(tile.channel);
+    state.recordings = data ? data.recs : [];
+    state.unassignedRecordings = data ? data.unknown : [];
+    draw();
+    if (tile.channel != null) {
+      if (!data) refreshRecordings();
+      refreshActiveRecording();
+      renderRecordingConfig();
+    }
   }
 
   let announcedMode;
-  function updateModeUi() {
-    const seeking = state.pendingSeek != null;
-    const live = state.mode === 'live' && !seeking;
-    const playing = state.streamStatus === 'playing';
-    const paused = state.mode === 'paused' && !seeking;
-    const key = seeking ? 'seeking' : paused ? 'paused' : !playing ? state.streamStatus : state.mode;
-    const badge = $('modeBadge');
-    badge.className = `badge ${key}`;
-    badge.textContent = t(`badge.${key}`);
-    $('manualSourceInfo').textContent = state.manualRecording ? t('video.manualSource') : '';
-    $('manualSourceInfo').classList.toggle('hidden', !state.manualRecording);
-    $('pauseIcon').setAttribute('href', paused ? '#ic-play' : '#ic-pause');
-    $('btnFwd').disabled = live;
-    $('btnSnapshot').disabled = !live || !playing;
-    $('btnRetryPlayback').classList.toggle('hidden', seeking || state.mode !== 'playback' || state.streamStatus !== 'error');
+  function updateModeUi(tile = activeTile()) {
+    updateTileBadge(tile);
+    if (tile !== activeTile()) return;
+    const tiles = visibleTiles();
+    const seeking = tile.pendingSeek != null;
+    const live = tile.mode === 'live' && !seeking;
+    const playing = tile.streamStatus === 'playing';
+    const allLive = tiles.length > 0 && tiles.every((t) => t.mode === 'live' && t.pendingSeek == null);
+    const allPlaying = allLive && tiles.every((t) => t.streamStatus === 'playing');
+    const allPaused = tiles.length > 0 && tiles.every((t) => t.mode === 'paused' && t.pendingSeek == null);
+    $('manualSourceInfo').textContent = tile.manualRecording ? t('video.manualSource') : '';
+    $('manualSourceInfo').classList.toggle('hidden', !tile.manualRecording);
+    $('pauseIcon').setAttribute('href', allPaused ? '#ic-play' : '#ic-pause');
+    $('btnFwd').disabled = allLive;
+    const canSnapshot = tile.channel != null
+      && ((live && playing) || (tile.mode === 'playback' && playing) || tile.lastFrame != null);
+    $('btnSnapshot').disabled = !canSnapshot;
+    $('btnRetryPlayback').classList.toggle('hidden', seeking || tile.mode !== 'playback' || tile.streamStatus !== 'error');
     const lb = $('btnLive');
     // Only offer the button when it can do something: leave playback or retry live video.
-    const hideLive = live && playing;
+    const hideLive = allLive && allPlaying;
     lb.disabled = false;
     lb.classList.toggle('hidden', hideLive);
     $('liveSep').classList.toggle('hidden', hideLive);
-    $('liveLabel').textContent = live ? t(playing ? 'live.btn' : 'live.retry') : t('live.back');
-    const mode = live && !playing ? state.streamStatus : seeking ? 'seeking' : state.mode;
+    $('liveLabel').textContent = allLive ? t(allPlaying ? 'live.btn' : 'live.retry') : t('live.back');
+    const mode = live && !playing ? tile.streamStatus : seeking ? 'seeking' : tile.mode;
     if (mode !== announcedMode) {
       announcedMode = mode;
       document.dispatchEvent(new CustomEvent('microvms:mode', { detail: { mode } }));
@@ -687,47 +1110,124 @@
   const canvasWidth = () => canvas.clientWidth;
   const xOf = (time) => ((time - state.viewStart) / (state.viewEnd - state.viewStart)) * canvasWidth();
   const tOf = (x) => state.viewStart + (x / canvasWidth()) * (state.viewEnd - state.viewStart);
-  const TIMELINE_TYPES = ['continuous', 'triggered', 'scheduled', 'other'];
+  const LANE_TOP = 24;
+  const LANE_HEIGHT = 30;
 
-  function trackGeometry(type) {
-    const top = 25;
-    const laneHeight = (canvas.clientHeight - top - 14) / TIMELINE_TYPES.length;
-    return { y: top + TIMELINE_TYPES.indexOf(type) * laneHeight, height: laneHeight };
+  /** Unique visible channels in tile order (duplicate tiles share one lane). */
+  function timelineChannels() {
+    const seen = new Set();
+    const out = [];
+    for (const tile of visibleTiles()) {
+      if (tile.channel == null || seen.has(tile.channel)) continue;
+      seen.add(tile.channel);
+      out.push(tile.channel);
+    }
+    return out;
   }
+
+  function timelineLanes() {
+    return timelineChannels().map((channel) => {
+      const data = state.recordingsByChannel.get(channel);
+      return {
+        channel,
+        name: channelName(channel),
+        recs: data ? data.recs : [],
+        unknown: data ? data.unknown : [],
+        complete: data ? data.complete : true,
+      };
+    });
+  }
+
+  const laneGeometry = (index) => ({ y: LANE_TOP + index * LANE_HEIGHT, height: LANE_HEIGHT });
+  const timelineHeight = (lanes = timelineLanes()) => LANE_TOP + Math.max(1, lanes.length) * LANE_HEIGHT;
 
   function recordingPixels(rec) {
     const end = recStop(rec);
     if (end <= state.viewStart || rec.start >= state.viewEnd || end <= rec.start) return null;
     const left = Math.max(0, xOf(rec.start));
     const length = Math.min(canvasWidth(), xOf(end)) - left;
-    return { left, width: Math.max(rec.type === 'continuous' ? 1 : 4, length) };
+    return { left, width: Math.max(1, length) };
+  }
+
+  function exportChecked(channel) {
+    if (!state.exportChannels.has(channel)) state.exportChannels.set(channel, true);
+    return state.exportChannels.get(channel);
+  }
+
+  const selectionActive = () => state.selStart != null && state.selEnd != null
+    && Math.max(state.selStart, state.selEnd) > Math.min(state.selStart, state.selEnd);
+
+  function updateExportCheckboxes() {
+    const enabled = selectionActive();
+    for (const { channel, input } of state.timelineCheckboxes) {
+      input.disabled = !enabled;
+      input.checked = exportChecked(channel);
+    }
+  }
+
+  function renderTimelineLabels(lanes) {
+    const box = $('tlLabels');
+    box.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'tl-label head';
+    box.appendChild(head);
+    state.timelineCheckboxes = [];
+    for (const lane of lanes) {
+      const row = document.createElement('label');
+      row.className = 'tl-label';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = exportChecked(lane.channel);
+      input.disabled = !selectionActive();
+      input.title = t('tl.exportChannel');
+      input.addEventListener('change', () => {
+        state.exportChannels.set(lane.channel, input.checked);
+      });
+      const name = document.createElement('span');
+      name.textContent = lane.name;
+      row.appendChild(input);
+      row.appendChild(name);
+      box.appendChild(row);
+      state.timelineCheckboxes.push({ channel: lane.channel, input });
+    }
   }
 
   function timelineRecordingAt(x, y, time) {
-    const type = TIMELINE_TYPES.find((kind) => {
-      const lane = trackGeometry(kind);
-      return y >= lane.y && y < lane.y + lane.height;
-    });
-    if (!type || type === 'continuous') return null; // ordinary timeline seek prefers continuous footage
-    const matches = state.recordings.filter((r) => {
-      if (r.type !== type) return false;
+    const lanes = timelineLanes();
+    const index = Math.floor((y - LANE_TOP) / LANE_HEIGHT);
+    if (index < 0 || index >= lanes.length) return null;
+    const lane = lanes[index];
+    const laneY = LANE_TOP + index * LANE_HEIGHT;
+    const containsX = (r) => {
       const pixels = recordingPixels(r);
       return pixels && x >= pixels.left && x < pixels.left + pixels.width;
-    });
-    return matches.find((r) => r.start <= time && time < recStop(r)) || matches[0] || null;
+    };
+    // Ambiguous recordings sit as a thin gray strip at the bottom of the lane.
+    if (y >= laneY + LANE_HEIGHT - 5) {
+      const unknown = lane.unknown.find((r) => containsX(r) && r.start <= time && time < recStop(r));
+      if (unknown) return { channel: lane.channel, unknown: true };
+    }
+    const matches = lane.recs.filter((r) => r.type === 'triggered'
+      && containsX(r) && r.start <= time && time < recStop(r));
+    return matches.length ? { rec: matches[0], channel: lane.channel } : null;
   }
 
   function resizeCanvas() {
+    const lanes = timelineLanes();
+    const height = timelineHeight(lanes);
+    canvas.style.height = `${height}px`;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = Math.round(canvas.clientWidth * dpr);
-    canvas.height = Math.round(canvas.clientHeight * dpr);
+    canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    renderTimelineLabels(lanes);
     draw();
   }
 
   function draw() {
     const W = canvas.clientWidth;
-    const H = canvas.clientHeight;
+    const lanes = timelineLanes();
+    const H = timelineHeight(lanes);
     const span = state.viewEnd - state.viewStart;
     const now = Date.now();
 
@@ -761,20 +1261,32 @@
     }
     ctx.lineWidth = 1;
 
-    for (const r of state.unassignedRecordings) {
-      const x1 = Math.max(0, xOf(r.start));
-      const x2 = Math.min(W, xOf(recStop(r)));
-      if (x2 <= x1) continue;
-      ctx.fillStyle = COLORS.text;
-      ctx.fillRect(x1, H - 12, Math.max(1, x2 - x1), 3);
-    }
-    for (const r of state.recordings) {
-      const pixels = recordingPixels(r);
-      if (!pixels) continue;
-      const lane = trackGeometry(r.type);
-      ctx.fillStyle = COLORS[r.type];
-      ctx.fillRect(pixels.left, lane.y + 1, pixels.width, lane.height - 3);
-    }
+    lanes.forEach((lane, index) => {
+      const y = LANE_TOP + index * LANE_HEIGHT;
+      ctx.strokeStyle = COLORS.line;
+      ctx.beginPath();
+      ctx.moveTo(0, y + LANE_HEIGHT - 0.5);
+      ctx.lineTo(W, y + LANE_HEIGHT - 0.5);
+      ctx.stroke();
+
+      const bar = (r, color) => {
+        const pixels = recordingPixels(r);
+        if (!pixels) return;
+        ctx.fillStyle = color;
+        ctx.fillRect(pixels.left, y + 2, pixels.width, LANE_HEIGHT - 6);
+      };
+      // Blue for every recording, then yellow for events so overlaps stay yellow.
+      for (const r of lane.recs) if (r.type !== 'triggered') bar(r, COLORS.continuous);
+      for (const r of lane.recs) if (r.type === 'triggered') bar(r, COLORS.triggered);
+
+      for (const r of lane.unknown) {
+        const x1 = Math.max(0, xOf(r.start));
+        const x2 = Math.min(W, xOf(recStop(r)));
+        if (x2 <= x1) continue;
+        ctx.fillStyle = COLORS.text;
+        ctx.fillRect(x1, y + LANE_HEIGHT - 4, Math.max(1, x2 - x1), 2);
+      }
+    });
 
     if (state.selStart != null && state.selEnd != null) {
       const x1 = xOf(Math.min(state.selStart, state.selEnd));
@@ -822,17 +1334,11 @@
     if (el.textContent !== msg) el.textContent = msg;
     el.classList.toggle('hidden', !msg);
   };
-  /** The "unknown type" lane only gets a legend entry when such footage is visible. */
-  function showOtherLegend(rows = []) {
-    const other = rows.some((r) => r.type === 'other');
-    $('otherSwatch').classList.toggle('hidden', !other);
-    $('otherLegend').classList.toggle('hidden', !other);
-  }
+  /** The channel label and export checkbox sit left of every timeline lane. */
   function scheduleFetch() {
     clearTimeout(fetchTimer);
     timelineRequest?.abort();
     timelineStatus(t('tl.loading'));
-    showOtherLegend();
     fetchTimer = setTimeout(() => refreshRecordings(), 250);
   }
 
@@ -841,26 +1347,92 @@
     timelineRequest?.abort();
     const request = new AbortController();
     timelineRequest = request;
-    const { viewStart, viewEnd, channel } = state;
-    const margin = (viewEnd - viewStart) * 0.5;
-    if (!background) { timelineStatus(t('tl.loading')); showOtherLegend(); }
-    try {
-      const { recs, unknown, complete } = await listRecordings(viewStart - margin, Math.min(viewEnd + margin, Date.now()), { channel, signal: request.signal });
-      if (request.signal.aborted) return;
-      const visible = (r) => r.start < viewEnd && recStop(r) > viewStart;
-      state.recordings = recs;
-      state.unassignedRecordings = unknown;
-      showOtherLegend(recs.filter(visible));
-      timelineStatus(!complete ? t('tl.partial')
-        : unknown.some(visible) ? t('tl.unknown')
-        : recs.some(visible) ? '' : t('tl.empty'));
-      draw();
-    } catch (e) {
-      if (!request.signal.aborted) {
-        timelineStatus(t('toast.timeline', { msg: e.message }));
-        showOtherLegend();
-      }
+    const { viewStart, viewEnd } = state;
+    const channels = timelineChannels();
+    if (!channels.length) {
+      state.recordingsByChannel.clear();
+      state.recordings = [];
+      state.unassignedRecordings = [];
+      timelineStatus(t('tile.empty'));
+      resizeCanvas();
+      return;
     }
+    const margin = (viewEnd - viewStart) * 0.5;
+    if (!background) timelineStatus(t('tl.loading'));
+    const from = viewStart - margin;
+    const to = Math.min(viewEnd + margin, Date.now());
+    // One request per visible channel; a failing channel does not blank the others.
+    const results = await Promise.all(channels.map(async (channel) => {
+      try {
+        return { channel, ...(await listRecordings(from, to, { channel, signal: request.signal })) };
+      } catch (e) {
+        return { channel, error: e };
+      }
+    }));
+    if (request.signal.aborted) return;
+    const map = new Map();
+    let failed = null;
+    let incomplete = false;
+    let anyVisible = false;
+    let unknownVisible = false;
+    const visible = (r) => r.start < viewEnd && recStop(r) > viewStart;
+    for (const result of results) {
+      if (result.error) { failed = failed || result.error; continue; }
+      map.set(result.channel, { recs: result.recs, unknown: result.unknown, complete: result.complete });
+      if (!result.complete) incomplete = true;
+      if (result.recs.some(visible)) anyVisible = true;
+      if (result.unknown.some(visible)) unknownVisible = true;
+    }
+    state.recordingsByChannel = map;
+    const active = map.get(state.channel);
+    state.recordings = active ? active.recs : [];
+    state.unassignedRecordings = active ? active.unknown : [];
+    timelineStatus(incomplete ? t('tl.partial')
+      : unknownVisible ? t('tl.unknown')
+      : anyVisible ? ''
+      : failed ? t('toast.timeline', { msg: failed.message })
+      : t('tl.empty'));
+    updateAudioOption();
+    resizeCanvas();
+  }
+
+  function updateAudioOption() {
+    const recs = [...state.recordingsByChannel.values()].flatMap((data) => data.recs);
+    const none = recs.length > 0 && !recs.some((rec) => rec.hasAudio);
+    $('expAudioHint').classList.toggle('hidden', !none);
+  }
+
+  function frameCanvas(video) {
+    if (!video.videoWidth || !video.videoHeight) return null;
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth;
+    c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  function captureTileFrame(tile) {
+    const frame = frameCanvas(tile.video);
+    if (frame) tile.lastFrame = frame;
+  }
+
+  function snapshotFromTile(tile) {
+    const frame = (tile.mode === 'paused' && tile.lastFrame)
+      ? tile.lastFrame
+      : (frameCanvas(tile.video) || tile.lastFrame);
+    if (!frame) { toast(t('ctl.snapshot.none'), true); return; }
+    const at = currentWall(tile);
+    const suffix = multiChannel() ? `_ch${tile.channel}` : '';
+    const name = `snapshot${suffix}_${fmtStamp(at)}.jpg`;
+    const url = frame.toBlob
+      ? null
+      : frame.toDataURL('image/jpeg', 0.95);
+    if (url) { download(url, name); return; }
+    frame.toBlob((blob) => {
+      const objectUrl = URL.createObjectURL(blob);
+      download(objectUrl, name);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60 * 1000);
+    }, 'image/jpeg', 0.95);
   }
 
   let drag = null;
@@ -891,6 +1463,10 @@
       setView(drag.view0[0] - dt, drag.view0[1] - dt);
     }
   });
+  function tileForChannel(channel) {
+    return visibleTiles().find((tile) => tile.channel === channel) || activeTile();
+  }
+
   canvas.addEventListener('pointerup', (ev) => {
     if (drag?.id !== ev.pointerId) return;
     const d = drag;
@@ -898,12 +1474,18 @@
     canvas.classList.toggle('selecting', state.selectMode);
     if (!d.moved && !d.selecting) {
       const time = Math.round(tOf(ev.offsetX));
-      const rec = timelineRecordingAt(ev.offsetX, ev.offsetY, time);
-      if (rec) {
-        newPlaybackIntent();
-        startRecording(rec, Math.max(rec.start, Math.min(time, recStop(rec) - 1)));
+      const hit = timelineRecordingAt(ev.offsetX, ev.offsetY, time);
+      if (hit?.rec) {
+        const tile = tileForChannel(hit.channel);
+        setActiveTile(tile);
+        newPlaybackIntent(tile);
+        const at = Math.max(hit.rec.start, Math.min(time, recStop(hit.rec) - 1));
+        startRecording(tile, hit.rec, at);
+        for (const other of visibleTiles()) if (other !== tile) playAt(at, { tile: other });
+      } else if (hit?.unknown) {
+        playAt(time, { preferUnassigned: true, tile: tileForChannel(hit.channel) });
       } else {
-        playAt(time, { preferUnassigned: ev.offsetY >= canvas.clientHeight - 14 });
+        playAtAll(time);
       }
     }
   });
@@ -928,6 +1510,7 @@
     $('expEnd').value = toLocalInput(b);
     dragExportRange = { a, b, startInput: $('expStart').value, endInput: $('expEnd').value };
     if (!exportAbort) $('expInfo').textContent = t('exp.duration', { d: fmtDuration(b - a) });
+    updateExportCheckboxes();
   }
 
   function selectionFromInputs() {
@@ -936,6 +1519,7 @@
     state.selEnd = state.selStart == null ? null : b;
     if (!exportAbort) $('expInfo').textContent = !Number.isFinite(a) || !Number.isFinite(b) ? ''
       : b > a ? t('exp.duration', { d: fmtDuration(b - a) }) : t('exp.endBeforeStart');
+    updateExportCheckboxes();
     draw();
   }
 
@@ -967,9 +1551,19 @@
   }
 
   /** Every part as its own download (fallback / password). */
-  function exportSeparate(chosen, base, pw) {
+  async function exportSeparate(chosen, base, pw, { auto = true, includeAudio = true, signal, clipChannel, label = '' } = {}) {
     const list = $('expLinks');
-    list.innerHTML = '';
+    if (!pw && !includeAudio) {
+      // No camera-side audio filter: remux each part in the browser and drop
+      // the audio track (no transcoding).
+      for (let i = 0; i < chosen.length; i++) {
+        const suffix = chosen.length === 1 ? '' : `_${pad(i + 1, String(chosen.length).length)}`;
+        await exportMerged([chosen[i]], `${base}${suffix}`, signal, clipChannel, {
+          auto: auto && i === 0, includeAudio: false, label,
+        });
+      }
+      return;
+    }
     chosen.forEach((c, i) => {
       const suffix = chosen.length === 1 ? '' : `_${pad(i + 1, String(chosen.length).length)}`;
       const url = exportUrl(c, `${base}_${fmtStamp(c.s)}${suffix}`, pw);
@@ -977,15 +1571,16 @@
       const link = document.createElement(pw ? 'button' : 'a');
       if (pw) link.addEventListener('click', () => download(url, ''));
       else { link.href = url; link.download = ''; }
-      link.textContent = `${fmtDateTime(c.s)} – ${fmtTime(c.e)} (${fmtDuration(c.e - c.s)})`;
+      link.textContent = [label, `${fmtDateTime(c.s)} – ${fmtTime(c.e)} (${fmtDuration(c.e - c.s)})`]
+        .filter(Boolean).join(' · ');
       li.appendChild(link);
       list.appendChild(li);
-      if (i === 0) download(url, ''); // further parts are explicit links; browsers can block download bursts
+      if (auto && i === 0) download(url, ''); // further parts are explicit links; browsers can block download bursts
     });
   }
 
   /** Load parts one after another and merge them into ONE .mkv in the browser. */
-  async function exportMerged(chosen, base, signal, clipChannel) {
+  async function exportMerged(chosen, base, signal, clipChannel, { auto = true, includeAudio = true, label = '' } = {}) {
     const a = chosen[0].s;
     const sources = chosen.map((c, i) => async () => {
       const res = await fetch(exportUrl(c, `${base}_part${i + 1}`, null), { credentials: 'same-origin', signal });
@@ -999,25 +1594,28 @@
     const titleParts = [$('deviceName').textContent || 'Axis'];
     if (clipChannel) titleParts.push(clipChannel);
     const result = await window.MkvConcat.concat(sources, {
+      includeAudio,
       // A cropped camera export can start at a preceding keyframe, so don't assert its actual DateUTC.
       startTimeMs: a === chosen[0].r.start ? a : undefined,
       title: titleParts.join(' – '),
       onProgress: ({ part, parts, bytes }) => {
-        $('expInfo').textContent = t('exp.loading', { part, parts, bytes: fmtBytes(bytes) });
+        $('expInfo').textContent = [label, t('exp.loading', { part, parts, bytes: fmtBytes(bytes) })]
+          .filter(Boolean).join(' · ');
       },
     });
-    signal.throwIfAborted();
+    signal?.throwIfAborted();
     const url = URL.createObjectURL(result.blob);
     const name = `${base}_${fmtStamp(a)}.mkv`;
-    download(url, name);
+    if (auto) download(url, name);
     const li = document.createElement('li');
     const link = document.createElement('a');
     link.href = url; link.download = name;
-    link.textContent = `${name} (${fmtBytes(result.blob.size)}, ${fmtDuration(result.durationMs)})`;
+    link.textContent = [label, `${name} (${fmtBytes(result.blob.size)}, ${fmtDuration(result.durationMs)})`]
+      .filter(Boolean).join(' · ');
     li.appendChild(link);
     $('expLinks').appendChild(li);
     setTimeout(() => URL.revokeObjectURL(url), 10 * 60 * 1000);
-    $('expInfo').textContent = t('exp.done', { n: chosen.length });
+    $('expInfo').textContent = [label, t('exp.done', { n: chosen.length })].filter(Boolean).join(' · ');
   }
 
   function planExport(recs, a, b) {
@@ -1059,48 +1657,96 @@
     const pw = usePw ? $('expPw').value : null;
     if (usePw && !pw) { toast(t('exp.needPassword'), true); return; }
     const mergeRequested = $('expMerge').checked;
-    const channel = state.channel;
+    const includeAudio = $('expAudio').checked !== false;
     const manual = state.manualRecording;
-    const clipChannel = manual ? t('video.manualSource') : multiChannel() ? channelName(channel) : null;
+    let channels;
+    if (manual) {
+      channels = state.channel != null ? [state.channel] : [];
+      if (!channels.length) { toast(t('tile.empty'), true); return; }
+    } else {
+      channels = timelineChannels().filter((channel) => exportChecked(channel));
+      if (!channels.length) { toast(t('exp.noChannels'), true); return; }
+    }
+    if (usePw && !includeAudio) { toast(t('exp.audio.zip'), true); return; }
+    if (b - a > 6 * HOUR) toast(t('exp.large', { d: fmtDuration(b - a) }));
+
     const name = ($('expName').value.trim() || 'export').replace(/[^\w.-]+/g, '_');
-    const base = manual ? `${name}_recording` : clipChannel ? `${name}_ch${channel}` : name;
     const request = new AbortController();
     const { signal } = request;
     exportAbort = request;
     $('btnExport').disabled = $('btnClearSel').disabled = true;
     $('btnCancelExport').classList.remove('hidden');
     $('expInfo').textContent = t('exp.checking');
+    $('expLinks').innerHTML = '';
+    let autoDownload = true;
+    const outcomes = [];
     try {
-      const { recs, unknown, complete } = manual ? { recs: [manual], unknown: [], complete: true } : await listRecordings(a, b, { channel, signal });
-      signal.throwIfAborted();
-      if (!complete) throw new Error(t('err.incomplete'));
-      const overlaps = (r) => r.start < b && recStop(r) > a;
-      if (unknown.some(overlaps)) throw new Error(t('err.source'));
-      const chosen = planExport(recs.filter(overlaps), a, b);
-      if (!chosen.length) { $('expInfo').textContent = t(manual ? 'exp.manualOutside' : 'exp.none'); return; }
-      if (chosen.some(({ r }) => !r.disk)) throw new Error(t('err.xml'));
-      const merge = mergeRequested && !usePw && chosen.length > 1;
-      const gaps = b - a - chosen.reduce((ms, c) => ms + c.e - c.s, 0);
-      if (b - a > 6 * HOUR) toast(t('exp.large', { d: fmtDuration(b - a) }));
-      const gapNote = gaps > 0 ? t('exp.gaps', { d: gaps < 1000 ? '< 1 s' : fmtDuration(gaps) }) : '';
-      $('expLinks').innerHTML = '';
+      for (let i = 0; i < channels.length; i++) {
+        const channel = channels[i];
+        const single = channels.length === 1;
+        const label = single ? '' : channelName(channel);
+        try {
+          if (!single) {
+            $('expInfo').textContent = t('exp.channelProgress', {
+              i: i + 1, n: channels.length, msg: t('exp.checking'),
+            });
+          }
+          const data = manual
+            ? { recs: [manual], unknown: [], complete: true }
+            : await listRecordings(a, b, { channel, signal });
+          signal.throwIfAborted();
+          if (!data.complete) throw new Error(t('err.incomplete'));
+          const overlaps = (r) => r.start < b && recStop(r) > a;
+          if (data.unknown.some(overlaps)) throw new Error(t('err.source'));
+          const chosen = planExport(data.recs.filter(overlaps), a, b);
+          if (!chosen.length) { outcomes.push({ channel, none: true }); continue; }
+          if (chosen.some(({ r }) => !r.disk)) throw new Error(t('err.xml'));
+          const merge = mergeRequested && !usePw && chosen.length > 1;
+          const gaps = b - a - chosen.reduce((ms, c) => ms + c.e - c.s, 0);
+          const gapNote = gaps > 0 ? t('exp.gaps', { d: gaps < 1000 ? '< 1 s' : fmtDuration(gaps) }) : '';
+          const base = manual ? `${name}_recording`
+            : channels.length > 1 ? `${name}_ch${channel}` : name;
+          const clipChannel = manual ? t('video.manualSource') : multiChannel() ? channelName(channel) : null;
 
-      if (!merge) {
-        exportSeparate(chosen, base, pw);
-        $('expInfo').textContent = [t(chosen.length > 1 ? 'exp.parts' : 'exp.started', { n: chosen.length }), gapNote]
-          .filter(Boolean).join(' ');
-        return;
-      }
-      try {
-        await exportMerged(chosen, base, signal, clipChannel);
-      } catch (e) {
-        if (e instanceof window.MkvConcat.MkvConcatIncompatibleError) {
-          request.abort(); // also release the current part's streaming response
-          exportSeparate(chosen, base, null);
-          $('expInfo').textContent = t('exp.incompatible', { n: chosen.length });
-          return;
+          if (!merge) {
+            await exportSeparate(chosen, base, pw, {
+              auto: autoDownload, includeAudio, signal, clipChannel, label,
+            });
+            autoDownload = false;
+            if (single) {
+              $('expInfo').textContent = [t(chosen.length > 1 ? 'exp.parts' : 'exp.started', { n: chosen.length }), gapNote]
+                .filter(Boolean).join(' ');
+            }
+          } else {
+            try {
+              await exportMerged(chosen, base, signal, clipChannel, { auto: autoDownload, includeAudio, label });
+              autoDownload = false;
+            } catch (e) {
+              if (e instanceof window.MkvConcat.MkvConcatIncompatibleError) {
+                await exportSeparate(chosen, base, null, {
+                  auto: autoDownload, includeAudio, signal: null, clipChannel, label,
+                });
+                autoDownload = false;
+                $('expInfo').textContent = t('exp.incompatible', { n: chosen.length });
+              } else {
+                throw e;
+              }
+            }
+          }
+          outcomes.push({ channel, chosen });
+        } catch (e) {
+          if (signal.aborted) throw e;
+          outcomes.push({ channel, error: e });
+          if (single) throw e;
         }
-        throw e;
+      }
+      signal.throwIfAborted();
+      if (channels.length > 1) {
+        const failed = outcomes.filter((o) => o.error);
+        const done = outcomes.filter((o) => o.chosen);
+        $('expInfo').textContent = failed.length
+          ? failed.map((o) => t('exp.channelFailed', { name: channelName(o.channel), msg: o.error.message })).join(' · ')
+          : done.length ? t('exp.channelDone', { n: done.length }) : t('exp.none');
       }
     } catch (e) {
       $('expInfo').textContent = signal.aborted ? t('exp.aborted') : t('exp.failed', { msg: e.message });
@@ -1109,6 +1755,52 @@
       exportAbort = null;
       $('btnCancelExport').classList.add('hidden');
       $('btnExport').disabled = $('btnClearSel').disabled = false;
+    }
+  }
+
+  // ------------------------------------------------------------ Network status
+
+  const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+
+  function formatBitrate(bps) {
+    if (!Number.isFinite(bps) || bps <= 0) return '';
+    return bps >= 1e6 ? `${(bps / 1e6).toFixed(1)} Mbit/s` : `${Math.round(bps / 1e3)} kbit/s`;
+  }
+
+  function totalBitrate() {
+    return visibleTiles().reduce((sum, tile) => sum + (Number(tile.pipeline?.bitrate) || 0), 0);
+  }
+
+  function updateBandwidth() {
+    const total = totalBitrate();
+    $('netRate').textContent = total > 0
+      ? t('net.rate', { rate: formatBitrate(total) })
+      : t('net.rate.none');
+  }
+
+  async function pingOnce(method) {
+    const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+      ? AbortSignal.timeout(3000)
+      : undefined;
+    const start = nowMs();
+    const res = await fetch(`ping.txt?t=${Date.now()}`, {
+      method, cache: 'no-store', credentials: 'same-origin', signal,
+    });
+    if (!res.ok) throw new Error(`${method} ${res.status}`);
+    return Math.max(0, Math.round(nowMs() - start));
+  }
+
+  async function updatePing() {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    const el = $('netPing');
+    try {
+      el.textContent = t('net.ping', { ms: await pingOnce('HEAD') });
+    } catch (e) {
+      try {
+        el.textContent = t('net.ping', { ms: await pingOnce('GET') });
+      } catch (err) {
+        el.textContent = t('net.ping.none');
+      }
     }
   }
 
@@ -1212,6 +1904,11 @@
     const request = new AbortController();
     activeRequest = request;
     const channel = state.channel;
+    if (channel == null) {
+      activeRecording = { channel: null, ongoing: [], unknown: false };
+      renderRecordingConfig();
+      return;
+    }
     if (activeRecording?.channel !== channel) activeRecording = undefined;
     renderRecordingConfig();
     try {
@@ -1270,8 +1967,11 @@
     enablingRecording = true;
     renderRecordingConfig();
     try {
-      const opts = multiChannel() ? `camera=${state.channel}&videocodec=h264` : 'videocodec=h264';
-      const p = new URLSearchParams({ diskid: disk, options: opts });
+      const opts = [];
+      if (multiChannel()) opts.push(`camera=${state.channel}`);
+      opts.push('videocodec=h264');
+      if ($('recAudio').checked) opts.push('audio=1', 'audiocodec=aac');
+      const p = new URLSearchParams({ diskid: disk, options: opts.join('&') });
       const doc = await fetchXml(`/axis-cgi/record/continuous/addconfiguration.cgi?${p}`);
       const c = doc.getElementsByTagName('configure')[0];
       if (c && c.getAttribute('result') === 'OK') toast(t('rec.enabled', { profile: c.getAttribute('profile') }));
@@ -1326,29 +2026,38 @@
   // ------------------------------------------------------------ Wiring
 
   $('btnLive').addEventListener('click', () => {
-    goLive();
+    goLiveAll();
     const now = Date.now();
     if (now < state.viewStart || now > state.viewEnd) showDay(startOfDay(now));
   });
-  $('btnPause').addEventListener('click', togglePause);
-  $('btnBack').addEventListener('click', () => skipBack(SKIP));
-  $('btnBack5').addEventListener('click', () => skipBack(SKIP_SHORT));
-  $('btnFwd').addEventListener('click', () => playAt((state.pendingSeek ?? currentWall()) + SKIP, { reuseManual: true }));
-  $('btnRetryPlayback').addEventListener('click', () => playAt(currentWall(), { reuseManual: true }));
+  $('btnPause').addEventListener('click', togglePauseAll);
+  $('btnBack').addEventListener('click', () => skipBackAll(SKIP));
+  $('btnBack5').addEventListener('click', () => skipBackAll(SKIP_SHORT));
+  $('btnFwd').addEventListener('click', () => skipForwardAll(SKIP));
+  $('btnRetryPlayback').addEventListener('click', retryPlaybackAll);
   $('btnSnapshot').addEventListener('click', () => {
-    if (state.mode !== 'live' || state.pendingSeek != null || state.streamStatus !== 'playing') return;
-    const p = new URLSearchParams({ camera: String(state.channel) });
-    const res = $('resolution').value;
-    if (res) p.set('resolution', res);
-    const suffix = multiChannel() ? `_ch${state.channel}` : '';
-    download(`/axis-cgi/jpg/image.cgi?${p}`, `snapshot${suffix}_${fmtStamp(Date.now())}.jpg`);
+    const tile = activeTile();
+    if (tile.channel == null) return;
+    if (tile.mode === 'live' && tile.pendingSeek == null && tile.streamStatus === 'playing') {
+      const p = new URLSearchParams({ camera: String(tile.channel) });
+      if (tile.resolution) p.set('resolution', tile.resolution);
+      const suffix = multiChannel() ? `_ch${tile.channel}` : '';
+      download(`/axis-cgi/jpg/image.cgi?${p}`, `snapshot${suffix}_${fmtStamp(Date.now())}.jpg`);
+      return;
+    }
+    snapshotFromTile(tile);
   });
-  $('resolution').addEventListener('change', () => { if (state.mode === 'live' && state.pendingSeek == null) goLive(); });
-  $('streamProfile').addEventListener('change', () => {
-    store.set('streamprofile', $('streamProfile').value);
-    if (state.mode === 'live' && state.pendingSeek == null) goLive();
+  $('layoutSelect').addEventListener('change', (ev) => {
+    const wasLive = visibleTiles().length > 0
+      && visibleTiles().every((tile) => tile.mode === 'live' && tile.pendingSeek == null);
+    const time = activeTile().pendingSeek ?? currentWall(activeTile());
+    state.layout = ev.target.value;
+    store.set('layout', state.layout);
+    applyLayout();
+    if (wasLive) goLiveAll();
+    else if (Number.isFinite(time)) playAtAll(time);
+    refreshRecordings();
   });
-  $('channel').addEventListener('change', (ev) => setChannel(Number(ev.target.value)));
 
   $('dayPicker').addEventListener('change', (ev) => {
     if (!ev.target.value) return;
@@ -1386,10 +2095,12 @@
     $('expStart').value = $('expEnd').value = '';
     $('expInfo').textContent = '';
     $('expLinks').innerHTML = '';
+    updateExportCheckboxes();
     draw();
   });
   $('btnEnableRec').addEventListener('click', enableContinuous);
   $('btnDisableRec').addEventListener('click', disableContinuous);
+  $('recAudio').addEventListener('change', () => store.set('rec.audio', $('recAudio').checked ? '1' : '0'));
 
   document.querySelectorAll('.lang-switch [data-lang]').forEach((b) => {
     b.classList.toggle('active', b.dataset.lang === window.I18N.lang);
@@ -1399,32 +2110,58 @@
   window.addEventListener('resize', resizeCanvas);
 
   setInterval(() => {
-    const time = currentWall();
-    $('clock').textContent = fmtDateTime(time);
-    // continue past the end of a completed recording
-    if (state.mode === 'playback' && state.streamStatus === 'playing' && state.rec?.stop != null && time > state.rec.stop + 2000) {
-      onRecordingEnded();
+    for (const tile of state.tiles) {
+      if (!tile.visible) continue;
+      if (tile.channel == null) {
+        $(tileId(tile, 'clock')).textContent = '–';
+        continue;
+      }
+      const time = currentWall(tile);
+      $(tileId(tile, 'clock')).textContent = fmtDateTime(time);
+      // continue past the end of a completed recording
+      if (tile.mode === 'playback' && tile.streamStatus === 'playing' && tile.rec?.stop != null && time > tile.rec.stop + 2000) {
+        onRecordingEnded(tile);
+      }
     }
     if (!drag) draw();
   }, 250);
 
+  document.addEventListener?.('pointerdown', unlockAudio, { capture: true });
+  document.addEventListener?.('visibilitychange', () => {
+    if (document.visibilityState !== 'hidden') updatePing();
+  });
+  setInterval(updateBandwidth, 1000);
+  setInterval(updatePing, 5000);
+  for (const tile of state.tiles) wireTile(tile);
+  updateAllTileUi();
+
   // Interface for add-on modules (ptz.js)
-  window.MicroVms = { toast, mode: () => announcedMode, channel: () => state.channel };
+  window.MicroVms = {
+    toast,
+    mode: () => announcedMode,
+    channel: () => activeTile().channel,
+    activeVideo: () => activeTile().video,
+    videos: () => state.tiles.map((tile) => tile.video),
+  };
 
   // ------------------------------------------------------------ Start
 
   (async () => {
     const now = Date.now();
+    loadLayoutPreference();
+    $('recAudio').checked = store.get('rec.audio') === '1';
     setView(now - 2 * HOUR, now + 30 * MIN, { fetch: false });
     $('jumpTime').value = toLocalInput(now - MIN);
     resizeCanvas();
     updateModeUi();
+    updateBandwidth();
+    updatePing();
     loadDeviceInfo();
     loadStorage();
     loadRecordingConfig();
     await Promise.all([loadChannels(), loadStreamProfiles()]);
-    document.dispatchEvent(new CustomEvent('microvms:channel', { detail: { channel: state.channel, previous: null } }));
-    if (!playbackIntent) goLive();
+    document.dispatchEvent(new CustomEvent('microvms:channel', { detail: { channel: activeTile().channel, previous: null } }));
+    if (!activeTile().intent) goLiveAll();
     await loadRecordingSources();
     refreshRecordings();
     refreshActiveRecording();
