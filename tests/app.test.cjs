@@ -478,6 +478,19 @@ test('the continuous recording controls are gone', async () => {
   assert.equal(html.includes('Daueraufzeichnung'), false);
 });
 
+test('pausing keeps the frame and does not claim no recording when footage exists', async () => {
+  const app = await browser();
+  app.route(() => recordings(1, recording('live', Date.now() - 60000, null, { recordingstatus: 'recording' })));
+  app.element('btnPause').events.click();
+  await tick();
+  await tick();
+  const tile = app.state.tiles[0];
+  assert.equal(tile.mode, 'paused');
+  assert.equal(tile.noRecording, false);
+  assert.equal(tile.el.classList.contains('no-recording'), false);
+  assert.doesNotMatch(app.element('videoMsg').textContent, /video\.noRecording/);
+});
+
 test('a late seek does not override returning to live', async () => {
   const app = await browser();
   const query = deferred();

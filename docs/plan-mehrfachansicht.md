@@ -508,11 +508,9 @@ Kameratest (manuell):
 9. **Feinschliff:** 6-Kanal-Performance/Stream-Staffelung, i18n, README,
    Backlog-Status, ADRs fortschreiben, Kameratest.
 
-Neue ADRs während der Umsetzung:
-
-- Mehrfachansicht = mehrere unabhängige Pipelines mit gemeinsamer Zeit.
-- Eine Timeline-Spur pro Kanal; Ereignis über Dauer.
-- Audio standardmäßig stumm, pro Kachel; Export fragt mit Standard „an“.
+ADRs (englisch): `docs/adr/0009-shared-timeline-and-export.md`,
+`0010-single-tools-sidebar-and-desktop-keyboard.md`,
+`0011-audio-and-recording-ownership.md`, `0012-explicit-no-footage-state.md`.
 
 ## 15. Offene Fragen
 

@@ -928,14 +928,31 @@
     return data.recs.some((rec) => rec.start <= time && time < recStop(rec));
   }
 
-  function holdAt(tile, time, msg) {
+  function markNoRecording(tile, on) {
+    tile.noRecording = on;
+    tile.el.classList.toggle('no-recording', on);
+    if (on) videoMsg(tile, t('video.noRecording'));
+  }
+
+  function holdAt(tile, time, msg, { checkFootage = true } = {}) {
     stopPipeline(tile);
     tile.mode = 'paused';
     tile.rec = null;
     tile.pausedAt = time;
-    tile.noRecording = footageAt(tile.channel, time) === false;
-    tile.el.classList.toggle('no-recording', tile.noRecording);
+    markNoRecording(tile, checkFootage && footageAt(tile.channel, time) === false);
     setStreamStatus(tile, 'idle', tile.noRecording ? t('video.noRecording') : msg);
+  }
+
+  /** A manual pause must not warn just because the local cache has a gap. */
+  async function verifyPausedFootage(tile, time) {
+    try {
+      const result = await findRecordingAtOrAfter(time, { channel: tile.channel });
+      if (tile.mode !== 'paused' || tile.pausedAt !== time) return;
+      const has = Boolean(result.rec || result.choices?.length);
+      markNoRecording(tile, !has);
+      if (!has) videoMsg(tile, t('video.noRecording'));
+      else if (tile.noRecording === false) videoMsg(tile, '');
+    } catch (e) { /* keep the held frame without a false warning */ }
   }
 
   function startRecording(tile, rec, time) {
@@ -949,7 +966,7 @@
   }
 
   function offerRecordings(tile, intent, time, choices) {
-    holdAt(tile, time, t('video.chooseSource'));
+    holdAt(tile, time, t('video.chooseSource'), { checkFootage: false });
     const list = $('sourceChoiceList');
     for (const [i, rec] of choices.slice(0, 12).entries()) {
       const button = document.createElement('button');
@@ -999,7 +1016,9 @@
     if (result.choices) { offerRecordings(tile, intent, time, result.choices); return; }
     const { rec } = result;
     if (!rec) {
-      holdAt(tile, time, t('video.noRecordingFrom', { when: fmtDateTime(time) }));
+      holdAt(tile, time, t('video.noRecording'), { checkFootage: false });
+      markNoRecording(tile, true);
+      videoMsg(tile, t('video.noRecording'));
       return;
     }
     if (rec.start > time) {
@@ -1071,7 +1090,8 @@
     if (tile.pendingSeek != null) {
       const time = tile.pendingSeek;
       newPlaybackIntent(tile);
-      holdAt(tile, time, '');
+      holdAt(tile, time, '', { checkFootage: false });
+      verifyPausedFootage(tile, time);
       return;
     }
     if (tile.mode === 'paused') return;
@@ -1081,7 +1101,8 @@
     tile.manualRecording = manual;
     tile.video.pause();
     captureTileFrame(tile);
-    holdAt(tile, time, '');
+    holdAt(tile, time, '', { checkFootage: false });
+    verifyPausedFootage(tile, time);
   }
 
   function resumeTile(tile = activeTile()) {
