@@ -40,6 +40,11 @@ Behavior:
 - Layout changes and tile zoom keep the **shared time state**: all live stays
   live, all paused stays paused at the same instant, otherwise playback resumes
   at the shared time. Selecting the current layout again does nothing.
+- A seek in a multi-view moves the shared clock to the **earliest footage of any
+  visible tile**. Tiles without footage at that instant hold with "No recording"
+  and start by themselves when the clock reaches their next recording. A tile
+  whose recording ends waits the same way instead of jumping ahead alone.
+  Pause, resume and the skip buttons act on this shared clock.
 - Skipping forward never touches a tile that is live.
 - The typed jump time seeks every visible tile.
 - Ambiguous source choices belong to their tile; the card shows the active

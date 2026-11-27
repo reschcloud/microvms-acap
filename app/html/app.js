@@ -87,6 +87,7 @@
       lastFrame: null,             // canvas with the last visible frame (pause/snapshot)
       picker: null,                // immediate channel chooser for empty tiles
       sourceChoices: null,         // { intent, time, choices } for an ambiguous lookup
+      waitingFor: null,            // next recording to start when the shared clock reaches it
       noRecording: false,          // held at a time without footage
       pipeline: null,
       generation: 0,
@@ -770,6 +771,7 @@
     tile.intent = new AbortController();
     tile.pendingSeek = null;
     tile.manualRecording = null;
+    tile.waitingFor = null;
     if (tile.sourceChoices) {
       tile.sourceChoices = null;
       if (tile === activeTile()) renderSourceChoices();
@@ -1052,7 +1054,10 @@
     try {
       const { rec: next, choices } = await findRecordingAtOrAfter(end, { channel, signal: intent.signal }, rec);
       if (!isCurrentIntent(intent, tile)) return;
-      if (next) startRecording(tile, next, Math.max(next.start, end));
+      // In a multi-view the others keep the shared time: wait for the next recording
+      // instead of jumping ahead of them.
+      if (next && next.start > end + 2000 && sharedClockRunning(tile)) waitForFootage(tile, end, next);
+      else if (next) startRecording(tile, next, Math.max(next.start, end));
       else if (choices) offerRecordings(tile, intent, end, choices);
       else holdAt(tile, end, t('video.endOfRecording'));
     } catch (e) {
@@ -1135,15 +1140,101 @@
 
   function playAtAll(time) {
     if (!Number.isFinite(time)) return;
-    for (const tile of visibleTiles()) playAt(time, { tile });
+    seekTogether(visibleTiles(), time);
+  }
+
+  /**
+   * One shared wall clock (ADR 0006): every tile looks up its own footage, but
+   * the clock jumps to the EARLIEST footage of any tile. Tiles without footage
+   * at that moment hold and start by themselves when the clock reaches their
+   * next recording (followSharedClock).
+   */
+  async function seekTogether(tiles, time) {
+    if (tiles.length <= 1 || time >= Date.now() - LIVE_THRESHOLD) {
+      tiles.forEach((tile) => playAt(time, { tile }));
+      return;
+    }
+    const intents = tiles.map((tile) => {
+      const intent = newPlaybackIntent(tile);
+      tile.pendingSeek = time;
+      videoMsg(tile, t('video.seeking'));
+      updateModeUi(tile);
+      return intent;
+    });
+    const results = await Promise.all(tiles.map((tile, i) => findRecordingAtOrAfter(time, {
+      channel: tile.channel, signal: intents[i].signal,
+    }).catch((error) => ({ error }))));
+    const current = tiles.filter((tile, i) => isCurrentIntent(intents[i], tile));
+    if (!current.length) return;
+
+    const starts = results.map((r, i) => (r.rec && current.includes(tiles[i]) ? Math.max(time, r.rec.start) : null))
+      .filter((start) => start != null);
+    const target = starts.length ? Math.min(...starts) : time;
+    if (target > time) toast(t('toast.jumpTo', { time: fmtTime(target) }));
+
+    tiles.forEach((tile, i) => {
+      if (!current.includes(tile)) return;
+      const { rec, choices, error } = results[i];
+      tile.pendingSeek = null;
+      if (error) holdAt(tile, time, t('toast.recListFailed', { msg: error.message }));
+      else if (choices) offerRecordings(tile, intents[i], time, choices);
+      else if (rec && rec.start <= target && target < recStop(rec)) startRecording(tile, rec, target);
+      else waitForFootage(tile, target, rec);
+    });
+  }
+
+  /** Hold a tile without footage; it starts when the shared clock reaches `next`. */
+  function waitForFootage(tile, time, next) {
+    holdAt(tile, time, t('video.noRecording'), { checkFootage: false });
+    markNoRecording(tile, true);
+    videoMsg(tile, t('video.noRecording'));
+    tile.waitingFor = next && next.start > time ? next : null;
+  }
+
+  /** Called by the clock tick: start waiting tiles once the shared clock reaches their footage. */
+  function followSharedClock() {
+    const waiting = visibleTiles().filter((tile) => tile.waitingFor && tile.mode === 'paused');
+    if (!waiting.length) return;
+    const leader = visibleTiles().find((tile) => tile.mode === 'playback'
+      && tile.streamStatus === 'playing' && tile.pendingSeek == null);
+    if (!leader) return;
+    const clock = currentWall(leader);
+    for (const tile of waiting) {
+      const rec = tile.waitingFor;
+      if (clock < rec.start) continue;
+      newPlaybackIntent(tile);
+      if (clock < recStop(rec)) startRecording(tile, rec, clock);
+      else playAt(clock, { tile });       // passed it already: look up again
+    }
+  }
+
+  /** Another tile is playing recorded footage, so this one must not run ahead alone. */
+  const sharedClockRunning = (tile) => visibleTiles().some((other) => other !== tile
+    && other.mode === 'playback' && other.streamStatus === 'playing');
+
+  /** Time of the shared clock: a tile that shows footage, not one that waits for it. */
+  function sharedClockTime(tiles = visibleTiles()) {
+    const leader = tiles.find((tile) => !tile.waitingFor && tile.mode === 'playback')
+      || tiles.find((tile) => !tile.waitingFor) || activeTile();
+    return leader.pendingSeek ?? currentWall(leader);
+  }
+
+  /** Several tiles on recorded footage (none live, none on a manual pick) step together. */
+  function stepsTogether(tiles) {
+    return tiles.length > 1 && tiles.every((tile) => !tile.manualRecording
+      && !(tile.mode === 'live' && tile.pendingSeek == null));
   }
 
   function skipBackAll(seconds) {
-    for (const tile of visibleTiles()) skipBack(seconds, tile);
+    const tiles = visibleTiles();
+    if (stepsTogether(tiles)) { playAtAll(sharedClockTime(tiles) - seconds); return; }
+    for (const tile of tiles) skipBack(seconds, tile);
   }
 
   function skipForwardAll(seconds) {
-    for (const tile of visibleTiles()) {
+    const tiles = visibleTiles();
+    if (stepsTogether(tiles)) { playAtAll(sharedClockTime(tiles) + seconds); return; }
+    for (const tile of tiles) {
       // Live is already "now": skipping forward would only reconnect the stream.
       if (tile.mode === 'live' && tile.pendingSeek == null) continue;
       playAt((tile.pendingSeek ?? currentWall(tile)) + seconds, { reuseManual: true, tile });
@@ -1157,7 +1248,7 @@
     return {
       live: all((t) => t.mode === 'live'),
       paused: all((t) => t.mode === 'paused'),
-      time: tile.pendingSeek ?? currentWall(tile),
+      time: tile.waitingFor ? sharedClockTime(tiles) : (tile.pendingSeek ?? currentWall(tile)),
     };
   }
 
@@ -1187,9 +1278,20 @@
     const tiles = visibleTiles();
     if (!tiles.length) return;
     if (tiles.every((tile) => tile.mode === 'paused' && tile.pendingSeek == null)) {
-      tiles.forEach((tile) => resumeTile(tile));
+      const at = tiles[0].pausedAt;
+      const together = tiles.length > 1 && at != null
+        && tiles.every((tile) => tile.pausedAt === at && !tile.manualRecording);
+      if (together) playAtAll(at);       // resume on the shared clock
+      else tiles.forEach((tile) => resumeTile(tile));
     } else {
+      const clock = sharedClockTime(tiles);
       tiles.forEach((tile) => pauseTile(tile));
+      // A tile waiting for footage pauses at the shared time, not at its old hold time.
+      for (const tile of tiles) {
+        if (!tile.waitingFor) continue;
+        tile.waitingFor = null;
+        tile.pausedAt = clock;
+      }
     }
   }
 
@@ -1595,7 +1697,7 @@
       ctx.strokeRect(x1 + 0.5, 0.5, x2 - x1 - 1, H - 1);
     }
 
-    const xp = xOf(currentWall());
+    const xp = xOf(activeTile().waitingFor ? sharedClockTime() : currentWall());
     if (xp >= 0 && xp <= W) {
       ctx.strokeStyle = state.mode === 'live' ? COLORS.live : COLORS.accent;
       ctx.lineWidth = 2;
@@ -1785,7 +1887,9 @@
       newPlaybackIntent(tile);
       const at = Math.max(hit.rec.start, Math.min(time, recStop(hit.rec) - 1));
       startRecording(tile, hit.rec, at);
-      for (const other of visibleTiles()) if (other !== tile) playAt(at, { tile: other });
+      // The clicked event fixes the shared time; the others follow without jumping ahead.
+      const others = visibleTiles().filter((other) => other !== tile);
+      if (others.length) seekTogether(others, at);
     } else if (hit?.unknown) {
       playAt(time, { preferUnassigned: true, tile: tileForChannel(hit.channel) });
     } else {
@@ -2588,13 +2692,15 @@
         $(tileId(tile, 'clock')).textContent = '–';
         continue;
       }
-      const time = currentWall(tile);
+      // A tile waiting for footage shows the shared clock, not its old hold time.
+      const time = tile.waitingFor ? sharedClockTime() : currentWall(tile);
       $(tileId(tile, 'clock')).textContent = fmtDateTime(time);
       // continue past the end of a completed recording
       if (tile.mode === 'playback' && tile.streamStatus === 'playing' && tile.rec?.stop != null && time > tile.rec.stop + 2000) {
         onRecordingEnded(tile);
       }
     }
+    followSharedClock();
     if (!drag) draw();
   }, 250);
 

@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme,
+    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -1143,4 +1143,56 @@ test('further export parts are offered as visible links in the export bar', asyn
   assert.doesNotMatch(links, /hidden/);
   assert.ok(html.indexOf('id="expLinks"') > html.indexOf('id="selectionBar"'));
   assert.ok(html.indexOf('id="expLinks"') < html.indexOf('id="inspector"'));
+});
+
+test('a click into a gap moves the shared clock to the earliest footage of any tile', async () => {
+  const app = await browser();
+  twoChannels(app);
+  const [overview, landscape] = app.state.tiles;
+  landscape.channel = 2;
+  landscape.visible = true;
+  app.state.layoutSize = 2;
+  const T = fixtureTime;
+  // Overview records later than Landscape; the click lands before both.
+  app.route(() => recordings(2,
+    recording('later', T + 120000, T + 180000, { source: '1' }),
+    recording('earlier', T + 60000, T + 90000, { source: '2' }),
+  ));
+  app.setView(T - 60000, T + 240000, { fetch: false });
+  const canvas = app.element('timeline');
+  const click = { isPrimary: true, button: 0, pointerId: 1, offsetX: 160, offsetY: 40 };
+  canvas.events.pointerdown(click);
+  canvas.events.pointerup(click);
+  await ticks();
+
+  assert.equal(landscape.pipeline.parameters[0], 'recordingid=earlier');
+  assert.equal(landscape.startWall, T + 60000);
+  assert.equal(overview.mode, 'paused', 'the overview must not run ahead to its own recording');
+  assert.equal(overview.pausedAt, T + 60000);
+  assert.equal(overview.noRecording, true);
+  assert.equal(overview.waitingFor.id, 'later');
+
+  // The shared clock is still before the overview footage: it keeps waiting.
+  landscape.streamStatus = 'playing';
+  landscape.startWall = T + 80000;
+  app.followSharedClock();
+  assert.equal(overview.mode, 'paused');
+
+  // Pausing now holds the waiting tile at the shared time, and resuming keeps them together.
+  app.element('btnPause').events.click();
+  assert.equal(overview.pausedAt, T + 80000);
+  assert.equal(overview.waitingFor, null);
+  app.element('btnPause').events.click();
+  await ticks();
+  assert.equal(landscape.pipeline.parameters[0], 'recordingid=earlier');
+  assert.equal(landscape.startWall, T + 80000);
+  assert.equal(overview.waitingFor.id, 'later');
+
+  // Once the clock reaches the overview recording, the overview starts by itself.
+  landscape.streamStatus = 'playing';
+  landscape.startWall = T + 125000;
+  app.followSharedClock();
+  assert.equal(overview.mode, 'playback');
+  assert.equal(overview.pipeline.parameters[0], 'recordingid=later');
+  assert.equal(overview.startWall, T + 125000);
 });
