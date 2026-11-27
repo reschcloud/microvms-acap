@@ -1966,6 +1966,45 @@
     } catch (e) { /* optional */ }
   }
 
+  function renderStorageMeter() {
+    const nameEl = $('storageDiskName');
+    const usedEl = $('storageUsed');
+    const fill = $('storageFill');
+    const lock = $('storageLock');
+    const lockIcon = $('storageLockIcon');
+    const disk = state.disks?.find((d) => d.id === 'SD_DISK')
+      || state.disks?.find((d) => d.status === 'ok')
+      || state.disks?.[0];
+    if (!disk) {
+      nameEl.textContent = t('storage.none');
+      usedEl.textContent = '';
+      fill.style.width = '0%';
+      fill.classList.remove('warn', 'critical');
+      lock.classList.add('hidden');
+      return;
+    }
+    const total = Number.isFinite(disk.total) ? disk.total : 0;
+    const free = Number.isFinite(disk.free) ? disk.free : 0;
+    const pct = total > 0 ? Math.max(0, Math.min(100, ((total - free) / total) * 100)) : 0;
+    nameEl.textContent = diskName(disk.id);
+    usedEl.textContent = total > 0 ? t('storage.used', {
+      used: ((total - free) / 1024 / 1024).toFixed(1),
+      total: (total / 1024 / 1024).toFixed(1),
+    }) : '';
+    fill.style.width = `${pct.toFixed(1)}%`;
+    fill.classList.toggle('warn', pct >= 85 && pct < 95);
+    fill.classList.toggle('critical', pct >= 95);
+    const known = disk.encryptionKnown;
+    lock.classList.toggle('hidden', !known);
+    lock.classList.toggle('encrypted', known && disk.encrypted);
+    lock.classList.toggle('unencrypted', known && !disk.encrypted);
+    lockIcon.setAttribute('href', disk.encrypted ? '#ic-lock' : '#ic-lock-open');
+    const lockText = t(disk.encrypted ? 'storage.encrypted' : 'storage.unencrypted');
+    lock.setAttribute('aria-label', lockText);
+    lock.setAttribute('data-tip', lockText);
+    lock.title = lockText;
+  }
+
   async function loadStorage() {
     const sel = $('recDisk');
     const prev = sel.value;
@@ -1981,6 +2020,11 @@
         readOnly: /^(yes|true)$/i.test(d.getAttribute('readonly') || ''),
         full: /^(yes|true)$/i.test(d.getAttribute('full') || ''),
         cleanup: d.getAttribute('cleanuppolicy'),
+        encrypted: /^(yes|true)$/i.test(d.getAttribute('diskencrypted') || ''),
+        encryptionKnown: d.getAttribute('diskencrypted') != null
+          || d.getAttribute('diskencryptionenabled') != null,
+        encryptionEnabled: /^(yes|true)$/i.test(
+          d.getAttribute('diskencryptionenabled') || d.getAttribute('encryptionenabled') || ''),
       })).filter((d) => d.id);
       state.storageState = 'ready';
       const gb = (kb) => (kb / 1024 / 1024).toFixed(1);
@@ -1992,14 +2036,13 @@
         });
       const text = parts.length ? `${t('storage.label')}: ${parts.join(' | ')}` : t('storage.none');
       $('storageStatus').textContent = text;
-      $('inspectorStorage').textContent = text;
     } catch (e) {
       state.disks = null;
       state.storageState = e.status === 401 || e.status === 403 ? 'forbidden' : 'unknown';
       const text = t(state.storageState === 'forbidden' ? 'storage.forbidden' : 'storage.unavailable');
       $('storageStatus').textContent = text;
-      $('inspectorStorage').textContent = text;
     }
+    renderStorageMeter();
     sel.replaceChildren();
     const targets = (state.disks || []).filter(writableDisk);
     for (const d of targets) {
@@ -2216,50 +2259,31 @@
     button.addEventListener('click', () => setLayout(button.dataset.layout));
   });
 
-  let appMenuOpen = false;
-
-  function setAppMenu(open) {
-    appMenuOpen = open;
-    $('appMenu').classList.toggle('hidden', !open);
-    $('btnAppMenu').setAttribute('aria-expanded', String(open));
-    $('statusChip').setAttribute('aria-expanded', String(open));
-  }
-
   function setInspector(open) {
     const panel = $('inspector');
+    document.body?.classList?.toggle?.('inspector-open', open);
     panel.classList.toggle('open', open);
     panel.setAttribute('aria-hidden', String(!open));
     $('btnInspector').setAttribute('aria-expanded', String(open));
+    $('statusChip').setAttribute('aria-expanded', String(open));
     store.set('inspector', open ? '1' : '0');
   }
 
-  $('btnAppMenu').addEventListener('click', () => setAppMenu(!appMenuOpen));
-  $('statusChip').addEventListener('click', () => setAppMenu(!appMenuOpen));
-  $('btnInspector').addEventListener('click', () => { setAppMenu(false); setInspector(true); });
+  const toggleInspector = () => setInspector(!$('inspector').classList.contains('open'));
+  $('btnInspector').addEventListener('click', toggleInspector);
+  $('statusChip').addEventListener('click', toggleInspector);
   $('btnInspectorClose').addEventListener('click', () => setInspector(false));
-  document.addEventListener?.('pointerdown', (ev) => {
-    if (!appMenuOpen) return;
-    if (ev.target.closest?.('#appMenu, #btnAppMenu, #statusChip')) return;
-    setAppMenu(false);
-  });
   document.addEventListener?.('pointerdown', (ev) => {
     if (ev.target.closest?.('.channel-picker')) return;
     state.tiles.forEach((tile) => hideChannelPicker(tile));
   });
-  document.addEventListener?.('keydown', (ev) => {
-    if (ev.key !== 'Escape') return;
-    setAppMenu(false);
-    if ($('inspector').classList.contains('open')) setInspector(false);
-  });
-  setAppMenu(false);
-  setInspector(store.get('inspector') === '1');
+  setInspector(store.get('inspector') !== '0');
 
   // ------------------------------------------------------------ Help and theater
 
   const bodyClass = (name, on) => document.body?.classList?.toggle?.(name, on);
 
   function openHelp() {
-    setAppMenu(false);
     const dialog = $('helpDialog');
     if (dialog.showModal) dialog.showModal();
     else dialog.classList.remove('hidden');
@@ -2289,7 +2313,6 @@
     bodyClass('theater', on);
     $('btnTheater').setAttribute('aria-pressed', String(on));
     if (on) {
-      setAppMenu(false);
       setInspector(false);
       const promise = document.documentElement?.requestFullscreen?.();
       promise?.catch?.(() => {});
@@ -2349,7 +2372,6 @@
     const pickerOpen = state.tiles.some((tile) => tile.picker && !tile.picker.classList.contains('hidden'));
     if (pickerOpen) { state.tiles.forEach((tile) => hideChannelPicker(tile)); return; }
     if ($('helpDialog')?.open) { closeHelp(); return; }
-    if (appMenuOpen) { setAppMenu(false); return; }
     if ($('inspector').classList.contains('open')) { setInspector(false); return; }
     if (selectionActive()) { clearSelection(); return; }
     if (state.theater) { setTheater(false); }

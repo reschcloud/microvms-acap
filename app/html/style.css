@@ -1124,3 +1124,62 @@ button.primary-soft:hover { background: rgba(10, 132, 255, .26); }
 .channel-picker { max-height: calc(100% - 20px); overflow-y: auto; }
 .ptz-pad button { font-size: 20px; }
 .ptz-zoom button { font-size: 22px; }
+
+/* One sidebar: status on top, storage meter under it */
+.inspector-head-actions { display: flex; align-items: center; gap: 4px; }
+.inspector-head-actions .lang-switch button { height: 24px; min-height: 24px; }
+.inspector-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 2px 11px;
+  border-bottom: 1px solid var(--line);
+}
+.inspector-status .net-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.storage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.storage-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.storage-name { font-size: 12px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.storage-lock { display: inline-flex; align-items: center; color: var(--muted); }
+.storage-lock .icon { width: 14px; height: 14px; }
+.storage-lock.encrypted { color: #30d158; }
+.storage-lock.unencrypted { color: var(--muted); opacity: .75; }
+.storage-used { margin-left: auto; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.storage-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--surface-3);
+}
+#storageFill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width var(--dur-base) var(--ease), background var(--dur-base) var(--ease);
+}
+#storageFill.warn { background: var(--triggered); }
+#storageFill.critical { background: var(--live); }
+#storageStatus.storage { font-size: 10px; line-height: 1.35; margin: 0; white-space: normal; }
+
+/* On desktop the sidebar is part of the layout, not a layer over the picture. */
+@media (min-width: 1101px) {
+  body.inspector-open .layout { padding-right: 362px; }
+  body.theater.inspector-open .layout { padding-right: 0; }
+}

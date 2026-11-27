@@ -5,8 +5,8 @@ Ein kleines VMS direkt in der Weboberfläche der Kamera:
 - **Live-Ansicht** (H.264 über RTSP-over-WebSocket → HTML5-Video/MSE) als 1er-, 2er-, 4er- oder 6er-Raster. Der Standard richtet sich nach der Zahl der aktiven Kanäle; leere Kacheln bleiben sichtbar und sind frei belegbar. Jede Kachel hat ein eigenes Lautsprecher-Icon; mehrere Kacheln können gleichzeitig Ton haben.
 - **Mehrere Kanäle/Sensoren** (Multisensor-Kameras, Encoder, View Areas, Quad-Ansicht): Jede Kachel hat ein eigenes Menü für Kanal, Streamprofil und Auflösung (`Properties.Image.NbrOfViews`, Namen aus `Image.I#.Name`, deaktivierte Kanäle sind nicht auswählbar). Bei mehr als sechs Kanälen liegen die ersten sechs auf den Kacheln, der Rest ist über das Kachelmenü erreichbar. PTZ, Inspector und Schnappschuss beziehen sich auf die aktive (angeklickte) Kachel. Die Timeline zeigt alle sichtbaren Kanäle; der Export folgt den Kanal-Chips in der Auswahlleiste.
 - **Stream-Profile**: Auswahl der auf der Kamera angelegten Profile (`streamprofile.cgi`) pro Kachel, H.264 wird dabei erzwungen. Automatisch: Einzelansicht nimmt das größte, Mehrfachansicht das kleinste auflösbare Profil; die Wahl wird pro Kanal gemerkt.
-- **Zweisprachig (Deutsch/English)**: automatisch nach Browsersprache, umschaltbar im Statusmenü (Auswahl wird gemerkt).
-- **Aufgeräumte Oberfläche**: schmale Topbar mit Layout-Segmenten, Statusmenü und Inspector (Werkzeuge) statt fester Seitenleiste; Video und Timeline nutzen die volle Breite. Dunkles Graphit, ein Blau als Akzent, sichtbare Fokusringe und Tooltips mit Tastenkürzen.
+- **Zweisprachig (Deutsch/English)**: automatisch nach Browsersprache, umschaltbar in der Werkzeug-Sidebar (Auswahl wird gemerkt).
+- **Aufgeräumte Oberfläche**: schmale Topbar mit Layout-Segmenten und einer einzigen Werkzeug-Sidebar statt Menü-Popover und fester Seitenleiste. Oben in der Sidebar stehen immer Ping und Bandbreite, darunter der SD-Füllstand mit Verschlüsselungs-Schloss; Video und Timeline nutzen die volle Breite. Dunkles Graphit, ein Blau als Akzent, sichtbare Fokusringe und Tooltips mit Tastenkürzen.
 - **Timeline** der Edge-Storage-Aufzeichnungen (SD-Karte / NAS) mit Kalendertagen, Zoom (Mausrad/Pinch), direkter Manipulation und „Zeit“-Popover für exakte Sprünge
   - Eine Spur pro sichtbarem Kanal, immer synchron: Blau für alle Aufzeichnungen, Gelb für Ereignisse (Überlappung bleibt gelb); mehrdeutige Aufnahmen als graue Leiste.
   - Zeitlineal ziehen = Bereich wählen; in einer Spur ziehen = verschieben; Klick = springen und Auswahl löschen; Alt+Ziehen = immer verschieben. Eine Auswahl öffnet die Exportleiste mit Kanal-Chips (Standard alle an).
@@ -21,13 +21,13 @@ Ein kleines VMS direkt in der Weboberfläche der Kamera:
   - „Audio einschließen“ ist standardmäßig an. Ohne Audio werden gemergte Exporte und unverschlüsselte Einzeldateien im Browser ohne Neukodierung neu gemuxt (Audiospur entfernt); bei passwortgeschützten ZIPs wird die Kombination abgelehnt.
 - **Ton pro Kachel**: Lautsprecher-Icon in jeder Kachel, mehrere gleichzeitig möglich. AAC über MSE; die Wahl wird pro Kanal gemerkt, startet nach einem Reload aber erst nach der ersten Nutzergeste hörbar. Wiedergabe mit Ton nur bei Aufnahmen, die eine Tonspur enthalten.
 - **Schnappschuss**: Live als JPEG über die Kamera-API; in Wiedergabe und Pause als Frame des sichtbaren Bildes mit Zeitstempel im Dateinamen.
-- **Netzanzeige**: Ping zur Kamera (alle 5 s, pausiert im Hintergrund-Tab) und die am Browser eingehende Stream-Bandbreite (Summe aller Kacheln).
+- **Netz- und Speicherstatus in der Sidebar**: Ping zur Kamera (alle 5 s, pausiert im Hintergrund-Tab), eingehende Stream-Bandbreite (Summe aller Kacheln) und ein Füllbalken des SD-Speichers; ein grünes Schloss markiert verschlüsselten Speicher.
 - **PTZ-Steuerung** – erscheint nur, wenn die Kamera PTZ kann (`Properties.PTZ.PTZ=yes`) **und** der angemeldete Benutzer PTZ-Rechte hat (Gruppe `ptz` bzw. Admin, ermittelt über `/axis-cgi/usergroup.cgi`)
   - Steuerkreuz und Zoom (gedrückt halten), Geschwindigkeit, Home, Presets anfahren
   - Klick ins Livebild zentriert, Mausrad zoomt auf die Mausposition; Tastatur: Alt+Pfeiltasten, Alt+ + / − (normale Pfeile gehören der Timeline)
   - Nur in der Live-Ansicht aktiv und folgt der aktiven Kachel; als kompakte Glasfläche über dem Bild, bei Fokusverlust/Tabwechsel wird jede Bewegung sofort gestoppt
   - Bedienelemente, die das Gerät laut `ptz.cgi?info=1` nicht kann, werden ausgeblendet
-- **Aufnahmestatus** am Livebild: „Aufnahme läuft“ nur bei einer von der Kamera als laufend gemeldeten Aufnahme. Ein klassisches Daueraufnahmeprofil allein gilt als „konfiguriert“. Im Statuschip und im Inspector steht auch, wenn die SD-Karte nicht beschreibbar ist. Eine Daueraufzeichnung lässt sich im Inspector für den gewählten Kanal starten und wieder beenden (Profil wird entfernt); optional wird sie mit AAC-Ton angelegt.
+- **Aufnahmestatus** am Livebild: „Aufnahme läuft“ nur bei einer von der Kamera als laufend gemeldeten Aufnahme. Ein klassisches Daueraufnahmeprofil allein gilt als „konfiguriert“. Im Statuschip und in der Werkzeug-Sidebar steht auch, wenn die SD-Karte nicht beschreibbar ist. Eine Daueraufzeichnung lässt sich im Inspector für den gewählten Kanal starten und wieder beenden (Profil wird entfernt); optional wird sie mit AAC-Ton angelegt.
 
 ### Bedienung
 

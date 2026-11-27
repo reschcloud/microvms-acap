@@ -304,19 +304,37 @@ test('recordings expose audio tracks and control the export audio option', async
   assert.equal(app.element('expAudioHint').classList.contains('hidden'), false);
 });
 
-test('the app menu opens the tools inspector and closes again', async () => {
+test('the tools sidebar is the only status surface and opens from the topbar', async () => {
   const app = await browser();
   const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
   assert.ok(html.includes('id="layoutSeg"'));
-  assert.ok(html.includes('id="btnAppMenu"'));
-  assert.equal(app.element('appMenu').classList.contains('hidden'), true);
-  app.element('btnAppMenu').events.click();
-  assert.equal(app.element('appMenu').classList.contains('hidden'), false);
-  app.element('btnInspector').events.click();
-  assert.equal(app.element('appMenu').classList.contains('hidden'), true);
-  assert.equal(app.element('inspector').classList.contains('open'), true);
+  assert.ok(html.includes('id="btnInspector"'));
+  assert.equal(html.includes('id="appMenu"'), false);
+  assert.equal(app.element('inspector').classList.contains('open'), true); // default open
+  assert.ok(html.indexOf('id="netStatus"') > html.indexOf('id="inspector"'));
+  assert.ok(html.indexOf('id="netStatus"') < html.indexOf('id="storageStatus"'));
   app.element('btnInspectorClose').events.click();
   assert.equal(app.element('inspector').classList.contains('open'), false);
+  app.element('btnInspector').events.click();
+  assert.equal(app.element('inspector').classList.contains('open'), true);
+});
+
+test('the storage meter visualizes usage and shows an encrypted lock', async () => {
+  const app = await browser();
+  app.route((url) => {
+    if (url.pathname.endsWith('/disks/list.cgi')) {
+      return listDisks(xml('disk', {
+        diskid: 'SD_DISK', status: 'OK', totalsize: '1000', freesize: '400', diskencrypted: 'true',
+      }));
+    }
+  });
+  await app.loadStorage();
+  assert.equal(app.element('storageDiskName').textContent, 'storage.sd');
+  assert.equal(app.element('storageFill').style.width, '60.0%');
+  assert.equal(app.element('storageLock').classList.contains('hidden'), false);
+  assert.equal(app.element('storageLock').classList.contains('encrypted'), true);
+  assert.equal(app.element('storageLock').classList.contains('unencrypted'), false);
+  assert.match(app.element('storageUsed').textContent, /storage\.used/);
 });
 
 test('shortcut resolution and theater mode follow the desktop rules', async () => {
