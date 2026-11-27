@@ -1019,3 +1019,34 @@ body.theater .ptz-layer { display: none !important; }
   .topbar .icon-button { width: 38px; height: 38px; }
   .toast { left: 8px; right: 8px; bottom: 78px; transform: none; max-width: none; }
 }
+
+/* Timeline status floats over the lanes: showing/hiding it never moves the layout. */
+.tl-canvas-wrap .tl-status {
+  position: absolute;
+  top: 28px;
+  right: 8px;
+  max-width: min(420px, 70%);
+  margin: 0;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--glass);
+  box-shadow: var(--shadow-popover);
+  color: var(--muted);
+  font-size: 11px;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#timelineStatus { margin-top: 0; }
+
+button.primary-soft {
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-color: rgba(106, 169, 255, .35);
+  background: rgba(10, 132, 255, .16);
+  color: #cfe3ff;
+  font-weight: 600;
+}
+button.primary-soft:hover { background: rgba(10, 132, 255, .26); }

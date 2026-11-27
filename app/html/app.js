@@ -79,6 +79,7 @@
       visible: index === 0,
       profile: 'auto',             // 'auto' or a stream profile name
       resolution: '',              // optional resolution override
+      autoFallback: false,         // auto profile failed once -> camera default
       audio: false,                // audio track requested
       muteUntilPlaying: false,     // unmute after the next playing event
       lastFrame: null,             // canvas with the last visible frame (pause/snapshot)
@@ -329,12 +330,14 @@
   }
 
   function effectiveProfile(tile) {
-    return tile.profile && tile.profile !== 'auto' && state.streamProfiles.some((p) => p.name === tile.profile)
-      ? tile.profile
-      : autoProfileName();
+    if (tile.profile && tile.profile !== 'auto' && state.streamProfiles.some((p) => p.name === tile.profile)) {
+      return tile.profile;
+    }
+    return tile.autoFallback ? '' : autoProfileName();
   }
 
   function loadTilePreferences(tile) {
+    tile.autoFallback = false;
     tile.profile = 'auto';
     tile.resolution = '';
     if (tile.channel == null) return;
@@ -403,6 +406,11 @@
   function wireTile(tile) {
     tile.el.addEventListener('pointerdown', () => setActiveTile(tile));
     tile.video.addEventListener('playing', () => onTilePlaying(tile));
+    for (const type of ['loadeddata', 'timeupdate']) {
+      tile.video.addEventListener(type, () => {
+        if (tile.pipeline && tile.streamStatus !== 'playing' && !tile.video.paused) onTilePlaying(tile);
+      });
+    }
 
     const chSel = $(tileId(tile, 'tileChannel'));
     chSel.addEventListener('change', () => setTileChannel(tile, chSel.value ? Number(chSel.value) : null));
@@ -410,6 +418,7 @@
     const streamSel = $(tileId(tile, 'tileStream'));
     streamSel.addEventListener('change', () => {
       tile.profile = streamSel.value || 'auto';
+      tile.autoFallback = false;
       saveTilePreferences(tile);
       renderTileMenu(tile);
       restartTileIfLive(tile);
@@ -700,6 +709,11 @@
         tile.streamTimer = setTimeout(() => {
           if (tile.generation === closedGen && isCurrentIntent(intent, tile)) goLive(false, tile);
         }, 2000);
+      } else if (tile.mode === 'live' && tile.pendingSeek == null && !tile.autoFallback
+        && (!tile.profile || tile.profile === 'auto') && autoProfileName()) {
+        // The automatically chosen profile may not be playable here: retry once with the camera default.
+        tile.autoFallback = true;
+        goLive(false, tile);
       } else {
         if (tile.mode === 'playback') {
           tile.startWall = lastWall;
@@ -720,7 +734,10 @@
       fail(t('video.connectFailed', { msg: err.message }));
       return;
     }
-    tile.streamTimer = setTimeout(() => fail(t('video.timeout')), 15000);
+    tile.streamTimer = setTimeout(() => {
+      if (video.readyState >= 2 && !video.paused) { onTilePlaying(tile); return; }
+      fail(t('video.timeout'));
+    }, 15000);
 
     pipeline.onSync = (ntp) => { if (gen === tile.generation) tile.syncWall = ntp; };
     pipeline.onServerClose = () => {
@@ -741,7 +758,10 @@
 
     pipeline.ready
       .then(() => {
-        if (gen !== tile.generation) return;
+        if (gen !== tile.generation) {
+          try { pipeline.close(); } catch (e) { /* ignore */ }
+          return;
+        }
         pipeline.rtsp.play(offsetSec || 0);
         return video.play();
       })
@@ -1032,6 +1052,13 @@
     btn.setAttribute('data-tip', label);
     btn.setAttribute('aria-label', label);
     use.setAttribute('href', on ? '#ic-speaker' : '#ic-speaker-off');
+  }
+
+  /** First user gesture: browsers allow unmuted playback from now on. */
+  function unlockAudio() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+    state.tiles.forEach(applyTileMuted);
   }
 
   function setTileAudio(tile, on) {
@@ -1505,6 +1532,7 @@
     if (mode === 'select') canvas.classList.add('selecting');
   });
   canvas.addEventListener('pointermove', (ev) => {
+    if (!drag) canvas.style.cursor = ev.offsetY < LANE_TOP ? 'col-resize' : 'grab';
     const tip = $('tlTooltip');
     const at = tOf(ev.offsetX);
     tip.textContent = `${fmtDateTime(at)} ${fmtOffset(at)}`;
@@ -2255,7 +2283,7 @@
     if (key === 'l' || key === 'L') return 'live';
     if (key === 'f' || key === 'F') return 'theater';
     if (key === 's' || key === 'S') return 'snapshot';
-    if (key === 'e' || key === 'E') return context.selection && !context.exporting ? 'export' : null;
+    if (key === 'e' || key === 'E') return context.exporting ? null : context.selection ? 'export' : 'clip';
     if (key === 'a' || key === 'A') return 'layout:auto';
     if (key === 't' || key === 'T') return 'today';
     if (key === 'ArrowLeft') return ev.shiftKey ? 'back30' : 'back5';
@@ -2300,6 +2328,7 @@
       case 'forward30': skipForwardAll(SKIP); break;
       case 'snapshot': takeSnapshot(); break;
       case 'export': doExport(...selectedExportRange()); break;
+      case 'clip': selectDefaultClip(); break;
       case 'theater': setTheater(!state.theater); break;
       case 'today': showDay(startOfDay(Date.now())); break;
       case 'zoomIn': zoom(0.8, currentWall()); break;
@@ -2381,6 +2410,20 @@
   $('btnExport').addEventListener('click', () => doExport(...selectedExportRange()));
   $('btnCancelExport').addEventListener('click', () => { if (exportAbort) exportAbort.abort(); });
   $('btnClearSel').addEventListener('click', clearSelection);
+
+  /** One-click entry into export: last minute up to the playhead. */
+  function selectDefaultClip() {
+    const end = Math.min(Math.round(currentWall()), Date.now());
+    state.selStart = end - MIN;
+    state.selEnd = end;
+    if (end < state.viewStart || end - MIN > state.viewEnd) setView(end - 2 * HOUR, end + 30 * MIN);
+    syncSelectionInputs();
+    draw();
+  }
+  $('btnClip').addEventListener('click', () => {
+    if (!selectionActive()) selectDefaultClip();
+    $('btnExport').focus?.();
+  });
   $('btnEnableRec').addEventListener('click', enableContinuous);
   $('btnDisableRec').addEventListener('click', disableContinuous);
   $('recAudio').addEventListener('change', () => store.set('rec.audio', $('recAudio').checked ? '1' : '0'));

@@ -66,8 +66,12 @@ async function browser() {
     }
     return nodes.get(id);
   };
+  // A real addEventListener: optional chaining must not hide undefined handlers.
+  const docEvents = {};
   const doc = {
     getElementById: element, querySelectorAll: () => [], dispatchEvent() {},
+    addEventListener(type, fn) { (docEvents[type] ||= []).push(fn); },
+    events: docEvents,
     createElement: (tag) => tag === 'a' ? { click() { downloads.push(this.href); }, remove() {} } : element(Symbol(tag)),
     body: { appendChild() {} },
   };
@@ -321,7 +325,8 @@ test('shortcut resolution and theater mode follow the desktop rules', async () =
   assert.equal(app.resolveShortcut({ key: ' ' }, { button: true }), null);
   assert.equal(app.resolveShortcut({ key: 'ArrowLeft' }, {}), 'back5');
   assert.equal(app.resolveShortcut({ key: 'ArrowLeft', shiftKey: true }, {}), 'back30');
-  assert.equal(app.resolveShortcut({ key: 'e' }, { selection: false }), null);
+  assert.equal(app.resolveShortcut({ key: 'e' }, { selection: false }), 'clip');
+  assert.equal(app.resolveShortcut({ key: 'e' }, { selection: true, exporting: true }), null);
   assert.equal(app.resolveShortcut({ key: 'e' }, { selection: true }), 'export');
   assert.equal(app.resolveShortcut({ key: '?' , shiftKey: true }, {}), 'help');
   assert.equal(app.resolveShortcut({ key: '1' }, { typing: true }), null);
@@ -338,6 +343,46 @@ test('shortcut resolution and theater mode follow the desktop rules', async () =
   app.setTheater(false);
   assert.equal(app.state.theater, false);
   assert.equal(app.timelineLanes().length, 2);
+});
+
+test('startup wires every tile, the ping and the status refresh', async () => {
+  const app = await browser();
+  // Regression 0.2.8: an undefined handler aborted the script before wiring and startup.
+  assert.ok(app.element('video').events.playing);
+  assert.ok(app.element('video6').events.timeupdate);
+  assert.ok(app.element('tileStream').events.change);
+  assert.ok(app.element('btnClip').events.click);
+  assert.match(app.element('netPing').textContent, /net\.ping/);
+  assert.doesNotMatch(app.element('recordingIndicator').textContent, /rec\.loading/);
+});
+
+test('a running picture clears the timeout error and stale pipelines are closed', async () => {
+  const app = await browser();
+  const tile = app.state.tiles[0];
+  app.element('video').events.timeupdate();
+  assert.equal(tile.streamStatus, 'playing');
+  assert.equal(app.element('videoMsg').classList.contains('hidden'), true);
+});
+
+test('an unplayable auto profile falls back to the camera default once', async () => {
+  const app = await browser();
+  const tile = app.state.tiles[0];
+  app.state.streamProfiles = [{ name: 'big', parameters: 'resolution=3840x2160' }];
+  app.state.layoutSize = 1;
+  app.goLive();
+  assert.ok(tile.pipeline.parameters.includes('streamprofile=big'));
+  tile.pipeline.rtsp.onError(new Error('decode'));
+  assert.equal(tile.autoFallback, true);
+  assert.ok(!tile.pipeline.parameters.some((p) => p.startsWith('streamprofile=')));
+  tile.pipeline.rtsp.onError(new Error('again'));
+  assert.equal(tile.streamStatus, 'error');
+});
+
+test('the clip button selects the last minute and opens the export bar', async () => {
+  const app = await browser();
+  app.element('btnClip').events.click();
+  assert.ok(app.state.selEnd - app.state.selStart === 60000);
+  assert.equal(app.element('selectionBar').classList.contains('hidden'), false);
 });
 
 test('a late seek does not override returning to live', async () => {
