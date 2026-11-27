@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    loadRecordingConfig, refreshActiveRecording, enableContinuous, disableContinuous, doExport, loadChannels,
+    refreshActiveRecording, doExport, loadChannels,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -457,6 +457,27 @@ test('both duplicate channels dim and warn when there is no footage at the held 
   }
 });
 
+test('audio rejected by the camera falls back to a muted video stream', async () => {
+  const app = await browser();
+  const tile = app.state.tiles[0];
+  app.element('tileAudio').events.click();
+  assert.equal(tile.audio, true);
+  assert.ok(tile.pipeline.parameters.includes('audio=1'));
+  tile.pipeline.rtsp.onError(new Error('RTSP/1.0 400 Bad Request'));
+  assert.equal(tile.audio, false);
+  assert.equal(tile.audioFailed, true);
+  assert.ok(tile.pipeline.parameters.includes('audio=0'));
+  assert.match(app.element('toast').textContent, /tile\.audio\.failed/);
+  assert.notEqual(tile.streamStatus, 'error');
+});
+
+test('the continuous recording controls are gone', async () => {
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  assert.equal(html.includes('recEnableRow'), false);
+  assert.equal(html.includes('recDisableRow'), false);
+  assert.equal(html.includes('Daueraufzeichnung'), false);
+});
+
 test('a late seek does not override returning to live', async () => {
   const app = await browser();
   const query = deferred();
@@ -885,20 +906,6 @@ test('an export stops before review if the camera will not return all matching r
   assert.equal(app.downloads.length, 0);
 });
 
-test('a configuration is not an active recording and locked SD cards are not eligible', async () => {
-  const app = await browser();
-  app.route((url) => {
-    if (url.pathname.endsWith('/disks/list.cgi')) return listDisks(xml('disk', { diskid: 'SD_DISK', status: 'OK', locked: 'yes' }));
-    if (url.pathname.endsWith('/listconfiguration.cgi')) return listConfigs(xml('continuousrecordingconfiguration', { diskid: 'SD_DISK' }));
-    return recordings(0);
-  });
-  await app.loadRecordingConfig();
-  assert.match(app.element('recordingIndicator').textContent, /rec.configured/);
-  await app.loadStorage();
-  assert.match(app.element('recordingIndicator').textContent, /rec.sdNotWritable/);
-  assert.equal(app.element('recDisk').options.length, 0);
-});
-
 test('a viewer can see active recording even without access to the disk list', async () => {
   const app = await browser();
   app.route((url) => {
@@ -911,97 +918,3 @@ test('a viewer can see active recording even without access to the disk list', a
   assert.match(app.element('recordingIndicator').textContent, /rec.activeDisk/);
 });
 
-test('continuous recording can be stopped and only the channel profile is removed', async () => {
-  const app = await browser();
-  app.state.channelCount = 2;
-  app.state.channel = 1;
-  let configs = [
-    xml('continuousrecordingconfiguration', { profile: '1', diskid: 'SD_DISK', options: 'camera=1' }),
-    xml('continuousrecordingconfiguration', { profile: '2', diskid: 'SD_DISK', options: 'camera=2' }),
-  ];
-  const removed = [];
-  app.route((url) => {
-    if (url.pathname.endsWith('/listconfiguration.cgi')) return listConfigs(...configs);
-    if (url.pathname.endsWith('/disks/list.cgi')) return listDisks(xml('disk', { diskid: 'SD_DISK', status: 'OK' }));
-    if (url.pathname.endsWith('/removeconfiguration.cgi')) {
-      const profile = url.searchParams.get('profile');
-      removed.push(profile);
-      configs = configs.filter((c) => c.getAttribute('profile') !== profile);
-      return xml('root', {}, [xml('remove', { profile, result: 'OK' })]);
-    }
-    return recordings(0);
-  });
-  await app.loadStorage();
-  await app.loadRecordingConfig();
-  await app.refreshActiveRecording();
-  assert.equal(app.element('recDisableRow').classList.contains('hidden'), false);
-  await app.disableContinuous();
-  assert.deepEqual(removed, ['1']);
-  assert.match(app.messages[0], /rec\.disable\.confirm/);
-  assert.match(app.element('toast').textContent, /rec\.disabled/);
-  assert.equal(app.element('recDisableRow').classList.contains('hidden'), true);
-  await app.refreshActiveRecording();
-  assert.equal(app.element('recEnableRow').classList.contains('hidden'), false);
-});
-
-test('continuous recording can be configured with AAC audio', async () => {
-  const app = await browser();
-  let options = '';
-  app.route((url) => {
-    if (url.pathname.endsWith('/disks/list.cgi')) return listDisks(xml('disk', { diskid: 'SD_DISK', status: 'OK' }));
-    if (url.pathname.endsWith('/addconfiguration.cgi')) {
-      options = url.searchParams.get('options');
-      return xml('root', {}, [xml('configure', { result: 'OK', profile: '1' })]);
-    }
-  });
-  await app.loadStorage();
-  app.element('recAudio').checked = true;
-  await app.enableContinuous();
-  assert.match(options, /videocodec=h264/);
-  assert.match(options, /audio=1/);
-  assert.match(options, /audiocodec=aac/);
-});
-
-test('stopping continuous recording does nothing when the confirmation is declined', async () => {
-  const app = await browser();
-  app.options({ confirm: false });
-  const removed = [];
-  app.route((url) => {
-    if (url.pathname.endsWith('/listconfiguration.cgi')) return listConfigs(xml('continuousrecordingconfiguration', { profile: '1', diskid: 'SD_DISK' }));
-    if (url.pathname.endsWith('/removeconfiguration.cgi')) { removed.push(url.searchParams.get('profile')); return ''; }
-    return recordings(0);
-  });
-  await app.loadRecordingConfig();
-  await app.disableContinuous();
-  assert.equal(removed.length, 0);
-  assert.equal(app.element('toast').textContent, '');
-});
-
-test('a viewer cannot stop continuous recording', async () => {
-  const app = await browser();
-  app.route((url) => {
-    if (url.pathname.endsWith('/listconfiguration.cgi')) return listConfigs(xml('continuousrecordingconfiguration', { profile: '1', diskid: 'SD_DISK' }));
-    if (url.pathname.endsWith('/removeconfiguration.cgi')) return bad(403);
-    return recordings(0);
-  });
-  await app.loadRecordingConfig();
-  await app.disableContinuous();
-  assert.match(app.element('toast').textContent, /rec\.disableFailed/);
-  assert.match(app.element('recStatus').textContent, /rec\.needsRights/);
-});
-
-test('continuous setup sends only one request while a first click is pending', async () => {
-  const app = await browser();
-  const adding = deferred();
-  let count = 0;
-  app.route((url) => {
-    if (url.pathname.endsWith('/disks/list.cgi')) return listDisks(xml('disk', { diskid: 'SD_DISK', status: 'OK' }));
-    if (url.pathname.endsWith('/addconfiguration.cgi')) { count++; return adding.response; }
-  });
-  await app.loadStorage();
-  const first = app.enableContinuous();
-  await app.enableContinuous();
-  assert.equal(count, 1);
-  adding.resolve(xml('root', {}, [xml('configure', { result: 'OK', profile: '1' })]));
-  await first;
-});

@@ -27,7 +27,7 @@ Ein kleines VMS direkt in der Weboberfläche der Kamera:
   - Klick ins Livebild zentriert, Mausrad zoomt auf die Mausposition; Tastatur: Alt+Pfeiltasten, Alt+ + / − (normale Pfeile gehören der Timeline)
   - Nur in der Live-Ansicht aktiv und folgt der aktiven Kachel; als kompakte Glasfläche über dem Bild, bei Fokusverlust/Tabwechsel wird jede Bewegung sofort gestoppt
   - Bedienelemente, die das Gerät laut `ptz.cgi?info=1` nicht kann, werden ausgeblendet
-- **Aufnahmestatus** am Livebild: „Aufnahme läuft“ nur bei einer von der Kamera als laufend gemeldeten Aufnahme. Ein klassisches Daueraufnahmeprofil allein gilt als „konfiguriert“. Im Statuschip und in der Werkzeug-Sidebar steht auch, wenn die SD-Karte nicht beschreibbar ist. Eine Daueraufzeichnung lässt sich im Inspector für den gewählten Kanal starten und wieder beenden (Profil wird entfernt); optional wird sie mit AAC-Ton angelegt.
+- **Aufnahmestatus**: Der Statuschip meldet, wenn die Kamera für den aktiven Kanal eine laufende Aufnahme meldet. Daueraufnahmen werden in dieser App nicht mehr eingerichtet oder beendet – dafür dient AXIS OS (Aufzeichnungen bzw. Aufzeichnungsgruppen).
 
 ### Bedienung
 
@@ -48,7 +48,6 @@ Kein eigener Server-Prozess: Die Oberfläche spricht direkt die VAPIX-APIs der K
 | Stream-Profile | `/axis-cgi/streamprofile.cgi` (`list`) → `streamprofile=…` |
 | Speicher | `/axis-cgi/disks/list.cgi` |
 | PTZ | `/axis-cgi/com/ptz.cgi`, Rechte: `/axis-cgi/usergroup.cgi`, `param.cgi?…Properties.PTZ.PTZ` |
-| Daueraufzeichnung | `/axis-cgi/record/continuous/listconfiguration.cgi`, `addconfiguration.cgi`, `removeconfiguration.cgi` |
 | Netzstatus | `ping.txt` (statisch, HTTP-Rundlauf), `pipeline.bitrate` der media-stream-library |
 
 Das Streaming nutzt Axis' MIT-lizenzierte [media-stream-library-js](https://github.com/AxisCommunications/media-stream-library-js) (v13.3.3, im Paket enthalten unter `html/vendor/`).
@@ -88,11 +87,11 @@ Für ein bereits vorhandenes Tag ohne Release: Actions → **Release** →
 
 Die frühere App-ID `minivms` wird nicht aktualisiert: AXIS OS behandelt `microvms` als neue App. Alte Lesezeichen müssen auf die neue URL zeigen; Browsereinstellungen bleiben beim Wechsel auf derselben Kamera-Origin erhalten.
 
-Für Aufzeichnungen muss eine SD-Karte/NAS eingerichtet und eine Aufzeichnung konfiguriert sein (Kamera → *Aufzeichnungen* bzw. *System → Speicher*, oder in Micro VMS **Daueraufnahme starten**).
+Für Aufzeichnungen muss eine SD-Karte/NAS eingerichtet und eine Aufzeichnung in AXIS OS konfiguriert sein (Kamera → *Aufzeichnungen* bzw. *System → Speicher*). Die App startet oder beendet keine Daueraufnahme.
 
 ### Kameratest
 
-1. Paket installieren, App öffnen und mit eingesetzter SD-Karte die Speicheranzeige prüfen. Falls noch nichts aufzeichnet: als Operator/Admin eine Daueraufnahme starten oder sie in AXIS OS einrichten. Prüfen, dass die App erst bei laufender Aufnahme „Aufnahme läuft“ meldet.
+1. Paket installieren, App öffnen und mit eingesetzter SD-Karte die Speicheranzeige prüfen. Falls noch nichts aufzeichnet: eine Daueraufnahme in AXIS OS einrichten. Prüfen, dass die App erst bei laufender Aufnahme „Aufnahme läuft“ meldet.
 2. Eine bekannte Uhrzeit in der Timeline oder per Datumsfeld öffnen. Direkt danach **Zurück zu Live** wählen. Eine verspätete Suche darf nicht zurück in die Wiedergabe wechseln.
    Falls Treffer keinem Kanal eindeutig zugeordnet werden können, die graue Spur anklicken und die Aufnahme unter dem Videobild auswählen. Der anschließende Clip-Export verwendet in diesem Modus nur diese eine Aufnahme.
 3. Einen Bereich wählen, pro Kanal den Export-Haken prüfen und **Export starten**. Datei(en), Bildinhalt, Zeitraum und Spulbarkeit kontrollieren. Bei mehreren Kanälen entsteht pro Kanal eine Datei; weitere Downloads über die Links starten. Falls möglich, einen Export über eine Aufnahmelücke testen.
@@ -130,11 +129,10 @@ microvms-acap/
 - Zeiten werden in der Zeitzone des Browsers angezeigt; die Kamera arbeitet intern mit UTC.
 - Beim zusammengefügten Export entsteht die Datei im Browser. Sehr lange Zeiträume (viele GB) brauchen entsprechend Platz; Chrome/Edge lagern große Dateien auf die Festplatte aus. Der Zusammenfüger wurde mit echten H.264-MKV-Dateien getestet (lückenlose Zeitstempel, Dekodieren und Spulen per ffmpeg geprüft), aber noch nicht mit echten Axis-Exporten.
 - Exportformat ist Matroska (`.mkv`, z. B. VLC). MP4-Export wird nicht von allen Geräten unterstützt.
-- Audio nutzt AAC (`audio=1&audiocodec=aac`); G.711/Opus werden nicht über MSE abgespielt. Viele Kameras brauchen ein Mikrofonmodul oder eine aktivierte Audioquelle. Aufnahmen dieses Tools enthalten nur dann Ton, wenn beim Anlegen der Daueraufnahme „Mit Ton aufzeichnen“ gewählt wurde; ältere Profile bleiben stumm.
+- Audio nutzt AAC (`audio=1&audiocodec=aac`); G.711/Opus werden nicht über MSE abgespielt. Viele Kameras brauchen ein Mikrofonmodul oder eine aktivierte Audioquelle. Aufnahmen enthalten nur dann Ton, wenn die Kamera sie mit Tonspur aufzeichnet. Wird Audio von der Kamera nicht akzeptiert, fällt die App automatisch auf stummes Video zurück.
 - Mehrfachansicht: Sechs gleichzeitige Streams können je nach Kamera das Verbindungslimit erreichen. Die Automatik nimmt in der Mehrfachansicht deshalb das kleinste auflösbare Profil; im Kachelmenü lässt sich pro Kanal ein größeres wählen.
-- Neuere AXIS OS (12+) können Aufzeichnungen über *Aufzeichnungsgruppen* verwalten. Liste/Wiedergabe/Export funktionieren weiterhin über die obigen APIs, die Anzeige „Daueraufzeichnung“ bezieht sich aber nur auf die klassische Continuous-Recording-API.
 - Die Timeline zählt separat gemeldete Ereignisclips, nicht einzelne Auslösungen innerhalb einer gruppierten Daueraufnahme. Wenn AXIS OS mehrere Aktionen in einer Aufnahme zusammenfasst und dafür keine separaten Clips meldet, lassen sich daraus keine Ereigniszeitpunkte ableiten.
-- Zugriff: Die Seite ist für angemeldete Kamera-Benutzer erreichbar; Starten und Beenden der Daueraufzeichnung brauchen Operator- oder Admin-Rechte.
+- Zugriff: Die Seite ist für angemeldete Kamera-Benutzer erreichbar; Aufzeichnungen werden in AXIS OS verwaltet.
 - PTZ folgt dem gewählten Kanal. Falls `usergroup.cgi` fehlt, prüft die App die Berechtigung ersatzweise per Positionsabfrage für Kanal 1. Je nach Firmware kann dabei einmal ein Anmeldedialog erscheinen.
-- Mehrkanal: Nummerierte Quellen werden nur zugeordnet, wenn die Antwort Hinweise auf 0- oder 1-basierte Nummerierung liefert. `Quad` und mehrdeutige Quellen werden nicht als Aufnahmen eines nummerierten Kanals ausgegeben. Für die klassische Daueraufzeichnung sendet die App `camera=N` in den Stream-Optionen; das muss auf der jeweiligen Firmware geprüft werden.
+- Mehrkanal: Nummerierte Quellen werden nur zugeordnet, wenn die Antwort Hinweise auf 0- oder 1-basierte Nummerierung liefert. `Quad` und mehrdeutige Quellen werden nicht als Aufnahmen eines nummerierten Kanals ausgegeben.
 - Die `vendorId` im Manifest ist ein Platzhalter.

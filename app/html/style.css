@@ -1213,3 +1213,29 @@ button.primary-soft:hover { background: rgba(10, 132, 255, .26); }
   background: rgba(20, 24, 30, .88);
 }
 .video-wrap.no-recording .tile-state-dot { background: var(--triggered); }
+
+/* Slightly larger small print across the app */
+body { font-size: 14px; line-height: 1.45; }
+.small { font-size: 13px; }
+label { font-size: 12px; }
+label.inline { font-size: 13px; }
+.status-chip, .recording-indicator { font-size: 12px; }
+.segmented button { font-size: 12px; }
+.badge { font-size: 11px; }
+.tile-label, .clock { font-size: 12px; }
+.tl-label { font-size: 12px; }
+.tl-tooltip { font-size: 12px; }
+.hint { font-size: 12px; }
+.net-status { font-size: 12px; }
+.chip { font-size: 12px; }
+.storage-used { font-size: 11px; }
+#storageStatus.storage { font-size: 11px; }
+.help-grid h4 { font-size: 13px; }
+.help-grid p { font-size: 13px; }
+.help-grid kbd { font-size: 12px; }
+.help-foot { font-size: 12px; }
+.tile-menu-body { font-size: 13px; }
+
+.tl-canvas-wrap .tl-status { font-size: 12px; }
+.tile-pager { font-size: 12px; }
+#storageStatus.storage { font-size: 12px; }

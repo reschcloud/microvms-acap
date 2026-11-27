@@ -82,6 +82,7 @@
       resolution: '',              // optional resolution override
       autoFallback: false,         // auto profile failed once -> camera default
       audio: false,                // audio track requested
+      audioFailed: false,          // audio caused an RTSP error; retried muted
       muteUntilPlaying: false,     // unmute after the next playing event
       lastFrame: null,             // canvas with the last visible frame (pause/snapshot)
       picker: null,                // immediate channel chooser for empty tiles
@@ -341,6 +342,7 @@
 
   function loadTilePreferences(tile) {
     tile.autoFallback = false;
+    tile.audioFailed = false;
     tile.profile = 'auto';
     tile.resolution = '';
     if (tile.channel == null) return;
@@ -592,7 +594,6 @@
       state.unassignedRecordings = [];
       draw();
       refreshActiveRecording();
-      renderRecordingConfig();
     }
     if (tile.visible) refreshRecordings();
   }
@@ -818,6 +819,18 @@
         tile.streamTimer = setTimeout(() => {
           if (tile.generation === closedGen && isCurrentIntent(intent, tile)) goLive(false, tile);
         }, 2000);
+      } else if (audioEnabled(tile) && !tile.audioFailed && tile.pendingSeek == null) {
+        // Audio can make the camera reject the RTSP request (e.g. unsupported AAC).
+        // Keep the video alive and retry once without audio.
+        tile.audioFailed = true;
+        tile.audio = false;
+        tile.muteUntilPlaying = false;
+        store.set(`audio.${tile.channel}`, '0');
+        applyTileMuted(tile);
+        updateTileAudio(tile);
+        toast(t('tile.audio.failed'), true);
+        if (tile.mode === 'live') goLive(false, tile);
+        else if (tile.mode === 'playback') playAt(lastWall, { tile, reuseManual: true });
       } else if (tile.mode === 'live' && tile.pendingSeek == null && !tile.autoFallback
         && (!tile.profile || tile.profile === 'auto') && autoProfileName()) {
         // The automatically chosen profile may not be playable here: retry once with the camera default.
@@ -1154,7 +1167,7 @@
       || MediaSource.isTypeSupported(AAC_MIME);
   }
 
-  const audioEnabled = (tile) => tile.audio && audioSupported();
+  const audioEnabled = (tile) => tile.audio && !tile.audioFailed && audioSupported();
 
   function applyTileMuted(tile) {
     tile.video.muted = !audioEnabled(tile) || !audioUnlocked || tile.muteUntilPlaying;
@@ -1185,6 +1198,7 @@
     if (tile.channel == null) return;
     if (on && !audioSupported()) { toast(t('tile.audio.unavailable'), true); return; }
     audioUnlocked = true;
+    if (on) tile.audioFailed = false;
     tile.audio = on;
     tile.muteUntilPlaying = on;
     store.set(`audio.${tile.channel}`, on ? '1' : '0');
@@ -1235,7 +1249,6 @@
     if (tile.channel != null) {
       if (!data) refreshRecordings();
       refreshActiveRecording();
-      renderRecordingConfig();
     }
   }
 
@@ -1450,7 +1463,7 @@
     const tzOffset = new Date(state.viewStart).getTimezoneOffset() * MIN;
     const changesOffset = new Date(state.viewEnd).getTimezoneOffset() * MIN !== tzOffset;
     let tick = Math.ceil((state.viewStart - tzOffset) / step) * step + tzOffset;
-    ctx.font = '11px system-ui, sans-serif';
+    ctx.font = '12px system-ui, sans-serif';
     ctx.textBaseline = 'top';
     for (; tick <= state.viewEnd; tick += step) {
       const d = new Date(tick);
@@ -2079,8 +2092,6 @@
   }
 
   async function loadStorage() {
-    const sel = $('recDisk');
-    const prev = sel.value;
     try {
       const doc = await fetchXml('/axis-cgi/disks/list.cgi?diskid=all');
       state.disks = Array.from(xmlElement(doc, 'disks').getElementsByTagName('disk'), (d) => ({
@@ -2116,54 +2127,12 @@
       $('storageStatus').textContent = text;
     }
     renderStorageMeter();
-    sel.replaceChildren();
-    const targets = (state.disks || []).filter(writableDisk);
-    for (const d of targets) {
-      const o = document.createElement('option');
-      o.value = d.id;
-      o.textContent = diskName(d.id);
-      sel.appendChild(o);
-    }
-    const preferred = targets.find((d) => d.id === prev) || targets.find((d) => d.id === 'SD_DISK') || targets[0];
-    if (preferred) sel.value = preferred.id;
-    renderRecordingConfig();
   }
 
-  // Continuous recording configurations (classic edge storage API)
   const writableDisk = (d) => d.status === 'ok' && !d.locked && !d.readOnly && (!d.full || d.cleanup === 'fifo');
   const diskName = (id) => id === 'SD_DISK' ? t('storage.sd') : (state.disks?.find((d) => d.id === id)?.name || id);
-  let recConfigs;
-  let configSeq = 0;
   let activeRecording;
   let activeRequest;
-  let enablingRecording = false;
-  let disablingRecording = false;
-  let setupDenied = false;
-
-  /** Channel a config records: "camera=N" in its options, otherwise channel 1. */
-  function configChannel(cfg) {
-    let options = cfg.options;
-    try { if (!options.includes('=')) options = decodeURIComponent(options); } catch (e) { return null; }
-    const camera = new URLSearchParams(options).get('camera');
-    return camera == null ? 1 : /^\d+$/.test(camera) ? Number(camera) : null;
-  }
-
-  async function loadRecordingConfig() {
-    const seq = ++configSeq;
-    try {
-      const doc = await fetchXml('/axis-cgi/record/continuous/listconfiguration.cgi');
-      if (seq !== configSeq) return;
-      recConfigs = Array.from(xmlElement(doc, 'continuousrecordingconfigurations').getElementsByTagName('continuousrecordingconfiguration'), (c) => ({
-        profile: c.getAttribute('profile'),
-        disk: c.getAttribute('diskid'),
-        options: c.getAttribute('options') || '',
-      }));
-    } catch (e) {
-      if (seq !== configSeq) return;
-      recConfigs = null;
-    }
-    renderRecordingConfig();
-  }
 
   async function refreshActiveRecording() {
     activeRequest?.abort();
@@ -2172,11 +2141,11 @@
     const channel = state.channel;
     if (channel == null) {
       activeRecording = { channel: null, ongoing: [], unknown: false };
-      renderRecordingConfig();
+      updateRecordingIndicator();
       return;
     }
     if (activeRecording?.channel !== channel) activeRecording = undefined;
-    renderRecordingConfig();
+    updateRecordingIndicator();
     try {
       const now = Date.now();
       const result = await listRecordings(now - 5 * MIN, now, { channel, signal: request.signal });
@@ -2187,106 +2156,22 @@
       if (request.signal.aborted) return;
       activeRecording = { channel, ongoing: [], unknown: true };
     }
-    renderRecordingConfig();
+    updateRecordingIndicator();
   }
 
-  function renderRecordingConfig() {
-    const mine = recConfigs?.filter((c) => configChannel(c) === state.channel) || [];
-    const ongoing = activeRecording?.channel === state.channel ? activeRecording.ongoing : [];
-    const activeDisks = [...new Set(ongoing.map((r) => r.disk).filter(Boolean))].map(diskName).join(', ');
-    const connected = state.disks?.filter((d) => d.status !== 'disconnected');
-    const writable = connected?.some(writableDisk);
-    const sd = connected?.find((d) => d.id === 'SD_DISK');
-    const active = ongoing.length > 0;
+  function updateRecordingIndicator() {
     const indicator = $('recordingIndicator');
-    const key = active ? (activeDisks ? 'rec.activeDisk' : 'rec.active')
-      : sd && !writableDisk(sd) ? 'rec.sdNotWritable'
-      : !activeRecording ? 'rec.loading'
-      : mine.length ? 'rec.configured'
-      : activeRecording.unknown ? 'rec.statusUnknown' : 'rec.notRunning';
+    if (!indicator) return;
+    const ongoing = activeRecording?.channel === state.channel ? activeRecording.ongoing : [];
+    const active = ongoing.length > 0;
+    const activeDisks = [...new Set(ongoing.map((r) => r.disk).filter(Boolean))].map(diskName).join(', ');
+    const key = !activeRecording ? 'rec.loading'
+      : activeRecording.unknown ? 'rec.statusUnknown'
+      : active ? (activeDisks ? 'rec.activeDisk' : 'rec.active')
+      : 'rec.notRunning';
     const message = t(key, { disks: activeDisks });
-    const setup = disablingRecording ? 'rec.disabling'
-      : enablingRecording ? 'rec.saving'
-      : setupDenied || state.storageState === 'forbidden' ? 'rec.needsRights'
-      : state.storageState === 'unknown' ? 'rec.noStorageAccess'
-      : connected && connected.length === 0 ? 'rec.setupDisk'
-      : connected && !writable ? 'rec.unwritable'
-      : recConfigs === null ? 'rec.unavailable'
-      : recConfigs === undefined || !activeRecording ? 'rec.loading'
-      : mine.length || active || activeRecording.unknown ? key : 'rec.off';
     indicator.classList.toggle('active', active);
     if (indicator.textContent !== message) indicator.textContent = message;
-    $('recStatus').textContent = t(setup, { disks: activeDisks });
-    const canEnable = Boolean(writable && recConfigs && !mine.length && !active && activeRecording && !activeRecording.unknown && !setupDenied);
-    $('recEnableRow').classList.toggle('hidden', !canEnable && !enablingRecording);
-    $('btnEnableRec').disabled = $('recDisk').disabled = enablingRecording;
-    // A profile can always be removed, even if the channel is currently recording.
-    $('recDisableRow').classList.toggle('hidden', !(recConfigs && mine.length) && !disablingRecording);
-    $('btnDisableRec').disabled = disablingRecording || enablingRecording;
-  }
-
-  async function enableContinuous() {
-    if (enablingRecording || setupDenied || !recConfigs || recConfigs.some((c) => configChannel(c) === state.channel)) return;
-    if (!activeRecording || activeRecording.channel !== state.channel || activeRecording.unknown || activeRecording.ongoing.length) return;
-    const disk = $('recDisk').value;
-    if (!state.disks?.some((d) => d.id === disk && writableDisk(d))) { toast(t('rec.noDisk'), true); return; }
-    enablingRecording = true;
-    renderRecordingConfig();
-    try {
-      const opts = [];
-      if (multiChannel()) opts.push(`camera=${state.channel}`);
-      opts.push('videocodec=h264');
-      if ($('recAudio').checked) opts.push('audio=1', 'audiocodec=aac');
-      const p = new URLSearchParams({ diskid: disk, options: opts.join('&') });
-      const doc = await fetchXml(`/axis-cgi/record/continuous/addconfiguration.cgi?${p}`);
-      const c = doc.getElementsByTagName('configure')[0];
-      if (c && c.getAttribute('result') === 'OK') toast(t('rec.enabled', { profile: c.getAttribute('profile') }));
-      else toast(t('rec.error', { msg: c ? c.getAttribute('errormsg') : t('rec.unknownResponse') }), true);
-    } catch (e) {
-      if (e.status === 401 || e.status === 403) setupDenied = true;
-      toast(t('rec.enableFailed', { msg: e.message }), true);
-    } finally {
-      await loadRecordingConfig();
-      enablingRecording = false;
-      renderRecordingConfig();
-      refreshActiveRecording();
-      setTimeout(() => { refreshRecordings(true); refreshActiveRecording(); }, 3000);
-    }
-  }
-
-  /** Remove the continuous recording profile(s) of the selected channel. */
-  async function disableContinuous() {
-    if (disablingRecording || !recConfigs) return;
-    const mine = recConfigs.filter((c) => configChannel(c) === state.channel);
-    const profiles = [...new Set(mine.map((c) => c.profile))].filter((p) => p != null && p !== '');
-    if (!profiles.length) { toast(t('rec.disableFailed', { msg: t('rec.unknownResponse') }), true); return; }
-    if (!confirm(t('rec.disable.confirm'))) return;
-    disablingRecording = true;
-    renderRecordingConfig();
-    const errors = [];
-    try {
-      for (const profile of profiles) {
-        try {
-          const p = new URLSearchParams({ profile });
-          const doc = await fetchXml(`/axis-cgi/record/continuous/removeconfiguration.cgi?${p}`);
-          const removed = doc.getElementsByTagName('remove')[0];
-          if (!removed || removed.getAttribute('result') !== 'OK') {
-            errors.push(removed?.getAttribute('errormsg') || t('rec.unknownResponse'));
-          }
-        } catch (e) {
-          if (e.status === 401 || e.status === 403) setupDenied = true;
-          errors.push(e.message);
-        }
-      }
-      if (errors.length) toast(t('rec.disableFailed', { msg: errors.join('; ') }), true);
-      else toast(t('rec.disabled'));
-    } finally {
-      await loadRecordingConfig();
-      disablingRecording = false;
-      renderRecordingConfig();
-      refreshActiveRecording();
-      setTimeout(() => { refreshRecordings(true); refreshActiveRecording(); }, 3000);
-    }
   }
 
   // ------------------------------------------------------------ Wiring
@@ -2573,9 +2458,6 @@
     if (!selectionActive()) selectDefaultClip();
     $('btnExport').focus?.();
   });
-  $('btnEnableRec').addEventListener('click', enableContinuous);
-  $('btnDisableRec').addEventListener('click', disableContinuous);
-  $('recAudio').addEventListener('change', () => store.set('rec.audio', $('recAudio').checked ? '1' : '0'));
 
   document.querySelectorAll('.lang-switch [data-lang]').forEach((b) => {
     b.classList.toggle('active', b.dataset.lang === window.I18N.lang);
@@ -2646,7 +2528,6 @@
     const session = readSessionSnapshot();
     loadLayoutPreference();
     if (session && ['auto', '1', '2', '4', '6'].includes(session.layout)) state.layout = session.layout;
-    $('recAudio').checked = store.get('rec.audio') === '1';
     const viewStart = Number.isFinite(session?.viewStart) ? session.viewStart : now - 2 * HOUR;
     const viewEnd = Number.isFinite(session?.viewEnd) ? session.viewEnd : now + 30 * MIN;
     setView(viewStart, viewEnd, { fetch: false });
@@ -2657,7 +2538,6 @@
     updatePing();
     loadDeviceInfo();
     loadStorage();
-    loadRecordingConfig();
     await Promise.all([loadChannels(), loadStreamProfiles()]);
     if (session && Array.isArray(session.channels)) {
       session.channels.forEach((camera, index) => {
@@ -2683,6 +2563,6 @@
     refreshRecordings();
     refreshActiveRecording();
     setInterval(() => { loadRecordingSources().then(() => refreshRecordings(true)); refreshActiveRecording(); }, 30 * 1000);
-    setInterval(() => { loadStorage(); loadRecordingConfig(); }, 60 * 1000);
+    setInterval(() => { loadStorage(); }, 60 * 1000);
   })();
 })();
