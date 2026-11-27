@@ -1431,3 +1431,40 @@ test('the connection shows the IP version when the URL names an address', async 
   assert.equal(app.connectionVia('kamera.local'), 'net.viaName {"host":"kamera.local"}');
   assert.equal(app.connectionVia(''), '');
 });
+
+test('playback asks the camera for the absolute start time, not a clip offset', async () => {
+  const app = await browser();
+  const sent = [];
+  app.win.mediaStreamLibrary.Html5VideoPipeline = class {
+    constructor(opts) {
+      this.parameters = opts.rtsp.parameters;
+      this.rtsp = { play() {}, _enqueue: (command) => sent.push(command) };
+      this.ready = Promise.resolve();
+    }
+    close() {}
+  };
+  const start = Date.UTC(2026, 10, 27, 9, 0, 0);
+  app.route(() => recordings(1, recording('long', start, start + 3600000)));
+  await app.playAt(start + 20 * 60000 + 250);
+  // The library would send npt=<offset>; the camera gets the wall time instead.
+  app.state.pipeline.rtsp._enqueue({ method: 'PLAY', headers: { Range: 'npt=1200.25-' } });
+  app.state.pipeline.rtsp._enqueue({ method: 'DESCRIBE' });
+  assert.equal(sent[0].headers.Range, 'clock=20261127T092000.250Z-');
+  assert.equal(sent[1].method, 'DESCRIBE');
+});
+
+test('the clock follows the stream time even if a camera starts at the clip start', async () => {
+  const app = await browser();
+  const start = fixtureTime;
+  app.route(() => recordings(1, recording('long', start, start + 3600000)));
+  await app.playAt(start + 20 * 60000);
+  const tile = app.state.tiles[0];
+  // The camera ignored the seek: the first frame is the beginning of the clip.
+  tile.pipeline.onSync(start);
+  tile.video.currentTime = 30;
+  assert.equal(app.state.tiles[0].syncWall, start);
+  assert.equal(app.state.rec.id, 'long');
+  // The export frame centers on the playhead time: the true stream time.
+  app.element('btnExport').events.click();
+  assert.equal(app.state.selStart, start + 30000 - 60000);
+});

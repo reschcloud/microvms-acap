@@ -847,7 +847,24 @@
     updateModeUi(tile);
   }
 
-  function startPipeline(tile, parameters, offsetSec, retryLive = true) {
+  /** RFC 2326 absolute time, e.g. 20261127T101500.250Z */
+  const rtspClock = (ms) => new Date(ms).toISOString().replace(/[-:]/g, '');
+
+  /**
+   * Axis plays recordings from an absolute time (Range: clock=…); the stream
+   * library only sends a relative npt offset, which the camera ignores for
+   * recordings, so playback started at the beginning of the clip. Rewrite the
+   * PLAY request of this one session (the library is vendored and pinned).
+   */
+  function seekByClock(rtsp, startMs) {
+    const enqueue = typeof rtsp?._enqueue === 'function' ? rtsp._enqueue.bind(rtsp) : null;
+    if (!enqueue) return;
+    rtsp._enqueue = (command) => enqueue(command?.method === 'PLAY'
+      ? { ...command, headers: { ...command.headers, Range: `clock=${rtspClock(startMs)}-` } }
+      : command);
+  }
+
+  function startPipeline(tile, parameters, offsetSec, retryLive = true, clockStart = null) {
     stopPipeline(tile);
     const gen = tile.generation;
     const video = tile.video;
@@ -903,6 +920,7 @@
         mediaElement: video,
       });
       tile.pipeline = pipeline;
+      if (clockStart != null) seekByClock(pipeline.rtsp, clockStart);
     } catch (err) {
       fail(t('video.connectFailed', { msg: err.message }));
       return;
@@ -1013,7 +1031,7 @@
     tile.startWall = time;
     tile.pausedAt = null;
     startPipeline(tile, [`recordingid=${encodeURIComponent(rec.id)}`, ...audioParams(tile, rec)],
-      Math.max(0, (time - rec.start) / 1000));
+      Math.max(0, (time - rec.start) / 1000), true, time);
   }
 
   function offerRecordings(tile, intent, time, choices) {
@@ -1085,15 +1103,21 @@
   }
 
   /** Point in time currently shown (wall clock, ms). */
+  function syncInRecording(tile) {
+    const rec = tile.rec;
+    if (!rec) return Math.abs(tile.syncWall - tile.startWall) < 5 * MIN;
+    return tile.syncWall >= rec.start - MIN && tile.syncWall <= recStop(rec) + MIN;
+  }
+
   function currentWall(tile = activeTile()) {
     if (tile.mode === 'live') return Date.now();
     if (tile.mode === 'paused') return tile.pausedAt != null ? tile.pausedAt : Date.now();
     const ct = tile.video.currentTime || 0;
-    // onSync gives the NTP time of media time 0; sanity check in case the
-    // device does not send the original time for playback.
-    if (tile.syncWall != null && Math.abs(tile.syncWall - tile.startWall) < 5 * MIN) {
-      return tile.syncWall + ct * 1000;
-    }
+    // onSync gives the original (NTP) time of media time 0. Trust it whenever it
+    // lies within the recording: then the clock is right even if a camera started
+    // somewhere else than requested. Anything else means the device sent no
+    // original time, and we count from the requested start.
+    if (tile.syncWall != null && syncInRecording(tile)) return tile.syncWall + ct * 1000;
     if (tile.baseCt == null) return tile.startWall;
     return tile.startWall + (ct - tile.baseCt) * 1000;
   }
