@@ -429,6 +429,11 @@ test('double-clicking a tile zooms to 1-up and back to the saved multi-view', as
   assert.equal(app.state.zoomReturn, null);
 });
 
+test('the centered channel button keeps its position while pressed', () => {
+  const css = readFileSync(require.resolve('../app/html/style.css'), 'utf8');
+  assert.match(css, /\.tile-empty-cta:active\s*\{[^}]*translate\(-50%,\s*-50%\)/);
+});
+
 test('a late seek does not override returning to live', async () => {
   const app = await browser();
   const query = deferred();

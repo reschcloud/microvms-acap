@@ -1197,3 +1197,8 @@ button.primary-soft:hover { background: rgba(10, 132, 255, .26); }
   max-height: min(60vh, 420px);
   overflow-y: auto;
 }
+
+/* Keep the centered empty-tile button in place while pressed. */
+.tile-empty-cta:active {
+  transform: translate(-50%, -50%) scale(.98);
+}
