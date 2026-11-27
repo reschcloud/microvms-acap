@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo,
+    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -378,7 +378,6 @@ test('startup wires every tile, the ping and the status refresh', async () => {
   assert.ok(app.element('tileStream').events.change);
   assert.ok(app.element('btnExport').events.click);
   assert.match(app.element('netPing').textContent, /net\.ping/);
-  assert.doesNotMatch(app.element('recordingIndicator').textContent, /rec\.loading/);
 });
 
 test('a running picture clears the timeout error and stale pipelines are closed', async () => {
@@ -996,7 +995,7 @@ test('a viewer can see active recording even without access to the disk list', a
   await app.loadStorage();
   await app.refreshActiveRecording();
   assert.match(app.element('storageStatus').textContent, /storage.forbidden/);
-  assert.match(app.element('recordingIndicator').textContent, /rec.activeDisk/);
+  assert.equal(app.state.recordingNow.get(1), true);
 });
 
 
@@ -1163,7 +1162,7 @@ test('light and dark mode follow the saved choice and refresh the timeline color
   assert.ok(html.indexOf("localStorage.getItem('minivms.theme')") < html.indexOf('style.css'));
   for (const theme of ['dark', 'light']) {
     const block = css.match(new RegExp(`:root\\[data-theme="${theme}"\\][^{]*\\{([^}]*)\\}`))[1];
-    for (const token of ['--bg', '--text', '--muted', '--accent', '--tl-bg', '--tl-future', '--tl-playhead', '--sel']) {
+    for (const token of ['--bg', '--text', '--muted', '--accent', '--tl-bg', '--tl-future', '--tl-playhead', '--sel', '--tl-night-rgb', '--tl-night-alpha']) {
       assert.match(block, new RegExp(`${token}:`), `${theme} ${token}`);
     }
   }
@@ -1350,4 +1349,25 @@ test('the device section lists model, serial, firmware and the IPv4/IPv6 address
   assert.equal(fallback['device.ipv4'], '10.0.0.5');
   assert.equal(fallback['device.ipv6'], '2001:db8::5');
   assert.equal(fallback['device.hostname'], 'cam');
+});
+
+test('the tile clock says today or yesterday instead of the date', async () => {
+  const app = await browser();
+  const now = new Date();
+  now.setHours(12, 24, 42, 0);
+  const today = now.getTime();
+  assert.equal(app.fmtDayTime(today), 'day.today 12:24:42');
+  assert.equal(app.fmtDayTime(today - 24 * 3600000), 'day.yesterday 12:24:42');
+  assert.match(app.fmtDayTime(today - 3 * 24 * 3600000), /^\d\d\.\d\d\.\d{4} 12:24:42$/);
+});
+
+test('the timeline background is darkest at night and lightest in the afternoon', async () => {
+  const app = await browser();
+  const at = (h) => new Date(2026, 10, 27, h).getTime();
+  assert.ok(Math.abs(app.nightness(at(2)) - 1) < 1e-9);
+  assert.ok(Math.abs(app.nightness(at(14))) < 1e-9);
+  assert.ok(app.nightness(at(22)) > app.nightness(at(18)));
+  assert.ok(app.nightness(at(6)) > app.nightness(at(10)));
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  assert.doesNotMatch(html, /statusChip|recordingIndicator/, 'no redundant recording chip in the top bar');
 });

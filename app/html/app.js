@@ -151,6 +151,13 @@
       : `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
   const fmtDateTime = (ms) => `${fmtDate(ms)} ${fmtTime(ms)}`;
+  /** Short day words for the tile clock; other days keep the full date. */
+  function fmtDayTime(ms) {
+    const day = startOfDay(ms);
+    const today = startOfDay(Date.now());
+    const word = day === today ? t('day.today') : day === shiftDay(today, -1) ? t('day.yesterday') : fmtDate(ms);
+    return `${word} ${fmtTime(ms)}`;
+  }
   function fmtOffset(ms) {
     const offset = -new Date(ms).getTimezoneOffset();
     return `UTC${offset >= 0 ? '+' : '−'}${pad(Math.trunc(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`;
@@ -1483,6 +1490,8 @@
       accent: cssVar('--accent', '#ffcc33'),
       live: cssVar('--live', '#e5484d'),
       font: cssVar('--font', 'system-ui, sans-serif'),
+      nightRgb: cssVar('--tl-night-rgb', '0, 0, 0'),
+      nightAlpha: Number(cssVar('--tl-night-alpha', '0.35')) || 0,
     });
   }
   readColors();
@@ -1702,6 +1711,35 @@
     draw();
   }
 
+  const EDGE_GAP = 6;
+
+  /** Darkness of the local night: 0 at 14:00, 1 at 02:00 (smooth cosine). */
+  function nightness(ms) {
+    const d = new Date(ms);
+    const hours = d.getHours() + d.getMinutes() / 60;
+    return (1 + Math.cos(((hours - 2) / 24) * 2 * Math.PI)) / 2;
+  }
+
+  /** A soft horizontal gradient: the timeline background is darker at night. */
+  function drawDaylight(W, H) {
+    const span = state.viewEnd - state.viewStart;
+    if (!(span > 0) || !COLORS.nightAlpha) return;
+    const gradient = ctx.createLinearGradient?.(0, 0, W, 0);
+    if (!gradient?.addColorStop) return;
+    const stop = (time) => {
+      const offset = Math.min(1, Math.max(0, (time - state.viewStart) / span));
+      const alpha = (COLORS.nightAlpha * nightness(time)).toFixed(3);
+      gradient.addColorStop(offset, `rgba(${COLORS.nightRgb}, ${alpha})`);
+    };
+    // One stop per half hour is smooth at any zoom; never more than ~400 stops.
+    const step = Math.max(30 * MIN, Math.ceil(span / 400 / (30 * MIN)) * 30 * MIN);
+    stop(state.viewStart);
+    for (let time = Math.ceil(state.viewStart / step) * step; time < state.viewEnd; time += step) stop(time);
+    stop(state.viewEnd);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, W, H);
+  }
+
   function draw() {
     const W = canvas.clientWidth;
     const lanes = timelineLanes();
@@ -1712,6 +1750,7 @@
     ctx.clearRect(0, 0, W, H);
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, W, H);
+    drawDaylight(W, H);
 
     if (now < state.viewEnd) {                         // shade the future
       const xn = Math.max(0, xOf(now));
@@ -1730,6 +1769,7 @@
       const isMidnight = d.getHours() === 0 && d.getMinutes() === 0;
       // Day boundaries get a thicker, crisper line.
       const x = Math.round(xOf(tick)) + (isMidnight ? 0 : 0.5);
+      if (x < EDGE_GAP || x > W - EDGE_GAP) continue;   // not on the rounded border
       ctx.strokeStyle = isMidnight ? COLORS.text : COLORS.line;
       ctx.lineWidth = isMidnight ? 2 : 1;
       ctx.beginPath(); ctx.moveTo(x, LANE_TOP - 6); ctx.lineTo(x, H); ctx.stroke();
@@ -2492,53 +2532,26 @@
 
   const writableDisk = (d) => d.status === 'ok' && !d.locked && !d.readOnly && (!d.full || d.cleanup === 'fifo');
   const diskName = (id) => id === 'SD_DISK' ? t('storage.sd') : (state.disks?.find((d) => d.id === id)?.name || id);
-  let activeRecording;
   let activeRequest;
 
+  /** Which visible channels the camera records right now (red dot in the tile tab). */
   async function refreshActiveRecording() {
     activeRequest?.abort();
     const request = new AbortController();
     activeRequest = request;
-    const channel = state.channel;
-    // The active channel feeds the status chip; every visible channel gets its tile dot.
-    const channels = [...new Set([channel, ...timelineChannels()].filter((c) => c != null))];
-    if (channel == null) activeRecording = { channel: null, ongoing: [], unknown: false };
-    else if (activeRecording?.channel !== channel) activeRecording = undefined;
-    updateRecordingIndicator();
+    const channels = [...new Set([state.channel, ...timelineChannels()].filter((c) => c != null))];
     if (!channels.length) return;
     try {
       const now = Date.now();
       const { rows } = await listRecordingRows(now - 5 * MIN, now, { signal: request.signal });
       if (request.signal.aborted) return;
       const ongoing = (r) => r.status === 'recording' && (!r.stop || r.stop > now - MIN);
-      for (const c of channels) {
-        const { recs, unknown } = selectChannel(rows, c);
-        const running = recs.filter(ongoing);
-        state.recordingNow.set(c, running.length > 0);
-        if (c === channel) activeRecording = { channel, ongoing: running, unknown: unknown.some(ongoing) };
-      }
+      for (const c of channels) state.recordingNow.set(c, selectChannel(rows, c).recs.some(ongoing));
     } catch (e) {
       if (request.signal.aborted) return;
       channels.forEach((c) => state.recordingNow.delete(c));
-      if (channel != null) activeRecording = { channel, ongoing: [], unknown: true };
     }
-    updateRecordingIndicator();
     updateAllTileUi();
-  }
-
-  function updateRecordingIndicator() {
-    const indicator = $('recordingIndicator');
-    if (!indicator) return;
-    const ongoing = activeRecording?.channel === state.channel ? activeRecording.ongoing : [];
-    const active = ongoing.length > 0;
-    const activeDisks = [...new Set(ongoing.map((r) => r.disk).filter(Boolean))].map(diskName).join(', ');
-    const key = !activeRecording ? 'rec.loading'
-      : activeRecording.unknown ? 'rec.statusUnknown'
-      : active ? (activeDisks ? 'rec.activeDisk' : 'rec.active')
-      : 'rec.notRunning';
-    const message = t(key, { disks: activeDisks });
-    indicator.classList.toggle('active', active);
-    if (indicator.textContent !== message) indicator.textContent = message;
   }
 
   // ------------------------------------------------------------ Wiring
@@ -2591,13 +2604,11 @@
     panel.classList.toggle('open', open);
     panel.setAttribute('aria-hidden', String(!open));
     $('btnInspector').setAttribute('aria-expanded', String(open));
-    $('statusChip').setAttribute('aria-expanded', String(open));
     store.set('inspector', open ? '1' : '0');
   }
 
   const toggleInspector = () => setInspector(!$('inspector').classList.contains('open'));
   $('btnInspector').addEventListener('click', toggleInspector);
-  $('statusChip').addEventListener('click', toggleInspector);
   $('btnInspectorClose').addEventListener('click', () => setInspector(false));
   document.addEventListener?.('pointerdown', (ev) => {
     if (ev.target.closest?.('.channel-picker')) return;
@@ -2850,7 +2861,7 @@
       }
       // A tile waiting for footage shows the shared clock, not its old hold time.
       const time = tile.waitingFor ? sharedClockTime() : currentWall(tile);
-      $(tileId(tile, 'clock')).textContent = fmtDateTime(time);
+      $(tileId(tile, 'clock')).textContent = fmtDayTime(time);
       // continue past the end of a completed recording
       if (tile.mode === 'playback' && tile.streamStatus === 'playing' && tile.rec?.stop != null && time > tile.rec.stop + 2000) {
         onRecordingEnded(tile);

@@ -34,6 +34,8 @@
 
 :root,
 :root[data-theme="dark"] {
+  --tl-night-rgb: 0, 0, 0;
+  --tl-night-alpha: .6;
   color-scheme: dark;
   --bg: #111214;
   --surface: #1b1c1f;
@@ -55,6 +57,8 @@
 }
 
 :root[data-theme="light"] {
+  --tl-night-rgb: 20, 30, 60;
+  --tl-night-alpha: .14;
   color-scheme: light;
   --bg: #f4f4f4;
   --surface: #ffffff;
@@ -224,21 +228,6 @@ label input:not([type="checkbox"]), label select { width: 100%; color: var(--tex
 .brand { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-right { display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; }
 
-.status-chip {
-  gap: 10px;
-  max-width: 320px;
-  margin-right: 6px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  color: var(--muted);
-}
-.status-dot { width: 9px; height: 9px; flex: none; border-radius: 50%; background: var(--muted); }
-.recording-indicator { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recording-indicator.active { color: var(--text); }
-.status-chip:has(.recording-indicator.active) .status-dot {
-  background: var(--live);
-  box-shadow: 0 0 0 4px rgba(232, 33, 39, .2);
-}
 
 /* ---------------------------------------------------------------- Layout */
 
@@ -752,7 +741,6 @@ body.theater .ptz-layer { display: none !important; }
   .viewer, .video-grid { flex: none; }
   .topbar { grid-template-columns: auto 1fr; height: 56px; padding: 0 10px; position: sticky; top: 0; z-index: 35; background: var(--bg); }
   .brand { display: none; }
-  .status-chip { display: none; }
   .segmented button { min-width: 38px; padding: 0 8px; }
   .layout { padding: 0 8px 8px; gap: 8px; }
   .video-grid.layout-2, .video-grid.layout-4, .video-grid.layout-6 { grid-template-columns: 1fr !important; grid-template-rows: none !important; }

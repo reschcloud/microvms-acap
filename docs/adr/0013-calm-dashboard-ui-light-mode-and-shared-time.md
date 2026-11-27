@@ -31,11 +31,14 @@ UI, in the style of a car dashboard:
   covers the camera's own text overlay: a state dot (green live, red live while
   the camera records that channel, blue playback, yellow connecting/seeking,
   gray paused/no picture), the channel name and the current time. The active
-  tile's tab is blue. There is no text badge on the picture (it stays for screen
+  tile's tab is blue. The time reads "Today"/"Yesterday" instead of a date when
+  it applies. The recording state is not repeated in the top bar. There is no text badge on the picture (it stays for screen
   readers). A tile held without footage shows no timestamp.
 - **The timeline folds itself:** one slim merged strip while every tile is live,
   the full lanes with toolbar in the archive (playback, pause, seek) and while
   exporting. A click into the strip enters the archive.
+  Its background darkens smoothly towards the local night (darkest 02:00,
+  lightest 14:00); day lines are kept but never drawn on the rounded border.
 - **Device details** in the settings: model, serial, firmware, host name, IPv4
   and IPv6 (network API, else Network parameters, else the browser's address). Empty slots are a themed placeholder with
   "Choose channel". Overlays on video stay dark in both themes.
