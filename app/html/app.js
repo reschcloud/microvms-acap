@@ -48,7 +48,7 @@
     recordingsByChannel: new Map(),
     unassignedRecordings: [],
     exportChannels: new Map(),   // channel -> export checkbox
-    timelineCheckboxes: [],      // { channel, input } for the left gutter
+    selectionChips: [],          // { channel, button } in the selection bar
     viewStart: 0,
     viewEnd: 0,
     selStart: null,
@@ -1176,39 +1176,52 @@
   const selectionActive = () => state.selStart != null && state.selEnd != null
     && Math.max(state.selStart, state.selEnd) > Math.min(state.selStart, state.selEnd);
 
-  function updateExportCheckboxes() {
-    const enabled = selectionActive();
-    for (const { channel, input } of state.timelineCheckboxes) {
-      input.disabled = !enabled;
-      input.checked = exportChecked(channel);
-    }
-  }
-
   function renderTimelineLabels(lanes) {
     const box = $('tlLabels');
     box.replaceChildren();
     const head = document.createElement('div');
     head.className = 'tl-label head';
     box.appendChild(head);
-    state.timelineCheckboxes = [];
     for (const lane of lanes) {
-      const row = document.createElement('label');
+      const row = document.createElement('div');
       row.className = 'tl-label';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = exportChecked(lane.channel);
-      input.disabled = !selectionActive();
-      input.title = t('tl.exportChannel');
-      input.addEventListener('change', () => {
-        state.exportChannels.set(lane.channel, input.checked);
-      });
       const name = document.createElement('span');
       name.textContent = lane.name;
-      row.appendChild(input);
       row.appendChild(name);
       box.appendChild(row);
-      state.timelineCheckboxes.push({ channel: lane.channel, input });
     }
+  }
+
+  function renderSelectionBar() {
+    const bar = $('selectionBar');
+    const active = selectionActive();
+    bar.classList.toggle('hidden', !active);
+    state.selectionChips = [];
+    if (!active) {
+      $('btnExport').disabled = true;
+      return;
+    }
+    const a = Math.min(state.selStart, state.selEnd);
+    const b = Math.max(state.selStart, state.selEnd);
+    $('selRange').textContent = `${fmtDateTime(a)} – ${fmtTime(b)} · ${fmtDuration(b - a)}`;
+
+    const box = $('selChannels');
+    box.replaceChildren();
+    const channels = timelineChannels();
+    for (const channel of channels) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chip';
+      button.textContent = channelName(channel);
+      button.setAttribute('aria-pressed', String(exportChecked(channel)));
+      button.addEventListener('click', () => {
+        state.exportChannels.set(channel, !exportChecked(channel));
+        renderSelectionBar();
+      });
+      box.appendChild(button);
+      state.selectionChips.push({ channel, button });
+    }
+    $('btnExport').disabled = !channels.some((channel) => exportChecked(channel));
   }
 
   function timelineRecordingAt(x, y, time) {
@@ -1240,6 +1253,7 @@
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     renderTimelineLabels(lanes);
+    renderSelectionBar();
     draw();
   }
 
@@ -1532,7 +1546,7 @@
     $('expEnd').value = toLocalInput(b);
     dragExportRange = { a, b, startInput: $('expStart').value, endInput: $('expEnd').value };
     if (!exportAbort) $('expInfo').textContent = t('exp.duration', { d: fmtDuration(b - a) });
-    updateExportCheckboxes();
+    renderSelectionBar();
   }
 
   function selectionFromInputs() {
@@ -1541,7 +1555,7 @@
     state.selEnd = state.selStart == null ? null : b;
     if (!exportAbort) $('expInfo').textContent = !Number.isFinite(a) || !Number.isFinite(b) ? ''
       : b > a ? t('exp.duration', { d: fmtDuration(b - a) }) : t('exp.endBeforeStart');
-    updateExportCheckboxes();
+    renderSelectionBar();
     draw();
   }
 
@@ -1550,8 +1564,7 @@
     dragExportRange = null;
     $('expStart').value = $('expEnd').value = '';
     $('expInfo').textContent = '';
-    $('expLinks').innerHTML = '';
-    updateExportCheckboxes();
+    renderSelectionBar();
     draw();
   }
 
@@ -1706,6 +1719,7 @@
     const request = new AbortController();
     const { signal } = request;
     exportAbort = request;
+    setInspector(true);
     $('btnExport').disabled = $('btnClearSel').disabled = true;
     $('btnCancelExport').classList.remove('hidden');
     $('expInfo').textContent = t('exp.checking');
@@ -1876,11 +1890,15 @@
           const status = d.status !== 'ok' ? d.status : t(writableDisk(d) ? 'storage.ready' : 'storage.notWritable');
           return `${diskName(d.id)}: ${status}${d.total > 0 ? ' · ' + t('storage.used', { used: gb(d.total - d.free), total: gb(d.total) }) : ''}`;
         });
-      $('storageStatus').textContent = parts.length ? `${t('storage.label')}: ${parts.join(' | ')}` : t('storage.none');
+      const text = parts.length ? `${t('storage.label')}: ${parts.join(' | ')}` : t('storage.none');
+      $('storageStatus').textContent = text;
+      $('inspectorStorage').textContent = text;
     } catch (e) {
       state.disks = null;
       state.storageState = e.status === 401 || e.status === 403 ? 'forbidden' : 'unknown';
-      $('storageStatus').textContent = t(state.storageState === 'forbidden' ? 'storage.forbidden' : 'storage.unavailable');
+      const text = t(state.storageState === 'forbidden' ? 'storage.forbidden' : 'storage.unavailable');
+      $('storageStatus').textContent = text;
+      $('inspectorStorage').textContent = text;
     }
     sel.replaceChildren();
     const targets = (state.disks || []).filter(writableDisk);
@@ -2127,6 +2145,7 @@
     setAppMenu(false);
     if ($('inspector').classList.contains('open')) setInspector(false);
   });
+  setAppMenu(false);
   setInspector(store.get('inspector') === '1');
 
   $('dayPicker').addEventListener('change', (ev) => {

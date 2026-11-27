@@ -289,6 +289,41 @@
         </div>
       </div>
 
+      <div id="ptzLayer" class="ptz-layer">
+      <div id="ptzCard" class="card hidden">
+        <h3 data-i18n="ptz.title"></h3>
+        <div id="ptzHint" class="muted small"></div>
+        <div class="ptz-main">
+          <div id="ptzPad" class="ptz-pad">
+            <button data-dir="-1,1" data-i18n-title="ptz.dir.ul">↖</button>
+            <button data-dir="0,1" data-i18n-title="ptz.dir.u">▲</button>
+            <button data-dir="1,1" data-i18n-title="ptz.dir.ur">↗</button>
+            <button data-dir="-1,0" data-i18n-title="ptz.dir.l">◀</button>
+            <button id="ptzHome" data-i18n-title="ptz.home">⌂</button>
+            <button data-dir="1,0" data-i18n-title="ptz.dir.r">▶</button>
+            <button data-dir="-1,-1" data-i18n-title="ptz.dir.dl">↙</button>
+            <button data-dir="0,-1" data-i18n-title="ptz.dir.d">▼</button>
+            <button data-dir="1,-1" data-i18n-title="ptz.dir.dr">↘</button>
+          </div>
+          <div id="ptzZoomRow" class="ptz-zoom">
+            <button id="ptzZoomIn" data-i18n-title="ptz.zoomIn">＋</button>
+            <span class="muted small" data-i18n="ptz.zoom"></span>
+            <button id="ptzZoomOut" data-i18n-title="ptz.zoomOut">－</button>
+          </div>
+        </div>
+        <label><span><span data-i18n="ptz.speed"></span> <span id="ptzSpeedVal"></span></span>
+          <input type="range" id="ptzSpeed" min="5" max="100" step="5" value="50">
+        </label>
+        <div id="ptzPresetRow" class="row">
+          <select id="ptzPreset" class="grow"></select>
+          <button id="ptzGoPreset" data-i18n="ptz.goto"></button>
+          <button id="ptzReloadPresets" data-i18n-title="ptz.reload">↻</button>
+        </div>
+        <label id="ptzCenterRow" class="inline"><input type="checkbox" id="ptzClickCenter" checked> <span data-i18n="ptz.clickCenter"></span></label>
+        <div class="muted small" data-i18n="ptz.keyboard"></div>
+      </div>
+      </div>
+
       <div id="sourceChoices" class="card hidden" aria-labelledby="sourceChoiceHint">
         <div id="sourceChoiceHint" role="status"></div>
         <div id="sourceChoiceList" class="row"></div>
@@ -341,6 +376,31 @@
           <i class="lg triggered"></i><span data-i18n="tl.legend.triggered"></span>
         </span>
       </div>
+      <div id="selectionBar" class="selection-bar hidden">
+        <div class="selection-main">
+          <span id="selRange" class="selection-range"></span>
+          <div id="selChannels" class="selection-channels"></div>
+        </div>
+        <div class="selection-actions">
+          <button id="btnExport" class="primary" data-i18n="exp.save">Sichern</button>
+          <details id="exportOptions" class="export-options">
+            <summary data-i18n="exp.options">Optionen</summary>
+            <div class="export-options-body">
+              <label><span data-i18n="exp.from"></span> <input type="datetime-local" id="expStart" step="1"></label>
+              <label><span data-i18n="exp.to"></span> <input type="datetime-local" id="expEnd" step="1"></label>
+              <label><span data-i18n="exp.name"></span> <input type="text" id="expName" placeholder="export"></label>
+              <label class="inline"><input type="checkbox" id="expMerge" checked> <span data-i18n="exp.merge"></span></label>
+              <label class="inline"><input type="checkbox" id="expPwEnable"> <span data-i18n="exp.password"></span></label>
+              <label id="expPwRow" class="hidden"><span data-i18n="exp.password.placeholder"></span><input type="password" id="expPw" autocomplete="new-password"></label>
+              <label class="inline"><input type="checkbox" id="expAudio" checked> <span data-i18n="exp.audio"></span></label>
+              <div id="expAudioHint" class="small muted hidden" data-i18n="exp.audio.none"></div>
+            </div>
+          </details>
+          <button id="btnCancelExport" class="hidden" data-i18n="exp.cancel"></button>
+          <button id="btnClearSel" class="icon-button" type="button" data-i18n-title="close">×</button>
+        </div>
+        <div id="expInfo" class="selection-info small muted" role="status"></div>
+      </div>
       <div class="tl-body">
         <div id="tlLabels" class="tl-labels"></div>
         <div class="tl-canvas-wrap">
@@ -360,75 +420,31 @@
         <button id="btnInspectorClose" class="icon-button" type="button" data-i18n-title="close">×</button>
       </div>
       <div class="inspector-body">
-      <div class="card">
-        <h3 data-i18n="exp.title"></h3>
-        <label><span data-i18n="exp.from"></span> <input type="datetime-local" id="expStart" step="1"></label>
-        <label><span data-i18n="exp.to"></span> <input type="datetime-local" id="expEnd" step="1"></label>
-        <details>
-          <summary data-i18n="exp.options"></summary>
-          <label><span data-i18n="exp.name"></span> <input type="text" id="expName" placeholder="export"></label>
-          <label class="inline"><input type="checkbox" id="expMerge" checked> <span data-i18n="exp.merge"></span></label>
-          <label class="inline"><input type="checkbox" id="expPwEnable"> <span data-i18n="exp.password"></span></label>
-          <label id="expPwRow" class="hidden"><span data-i18n="exp.password.placeholder"></span><input type="password" id="expPw" autocomplete="new-password"></label>
+        <details class="inspector-section" open>
+          <summary data-i18n="rec.title">Daueraufzeichnung</summary>
+          <div id="recStatus" class="small" data-i18n="rec.loading"></div>
+          <div id="recEnableRow" class="row hidden">
+            <select id="recDisk" data-i18n-title="rec.disk.title"></select>
+            <label class="inline"><input type="checkbox" id="recAudio"> <span data-i18n="rec.audio"></span></label>
+            <button id="btnEnableRec" data-i18n="rec.enable"></button>
+          </div>
+          <div id="recDisableRow" class="row hidden">
+            <button id="btnDisableRec" data-i18n-title="rec.disable.title">
+              <svg class="icon" width="16" height="16"><use href="#ic-stop"/></svg><span data-i18n="rec.disable"></span>
+            </button>
+          </div>
         </details>
-        <label class="inline"><input type="checkbox" id="expAudio" checked> <span data-i18n="exp.audio"></span></label>
-        <div id="expAudioHint" class="small muted hidden" data-i18n="exp.audio.none"></div>
-        <div class="row">
-          <button id="btnExport" class="primary" data-i18n="exp.start"></button>
-          <button id="btnCancelExport" class="hidden" data-i18n="exp.cancel"></button>
-          <button id="btnClearSel" data-i18n="exp.clear"></button>
-        </div>
-        <div id="expInfo" class="muted small" role="status"></div>
-        <ul id="expLinks" class="links"></ul>
-      </div>
 
-      <div id="ptzCard" class="card hidden">
-        <h3 data-i18n="ptz.title"></h3>
-        <div id="ptzHint" class="muted small"></div>
-        <div class="ptz-main">
-          <div id="ptzPad" class="ptz-pad">
-            <button data-dir="-1,1" data-i18n-title="ptz.dir.ul">↖</button>
-            <button data-dir="0,1" data-i18n-title="ptz.dir.u">▲</button>
-            <button data-dir="1,1" data-i18n-title="ptz.dir.ur">↗</button>
-            <button data-dir="-1,0" data-i18n-title="ptz.dir.l">◀</button>
-            <button id="ptzHome" data-i18n-title="ptz.home">⌂</button>
-            <button data-dir="1,0" data-i18n-title="ptz.dir.r">▶</button>
-            <button data-dir="-1,-1" data-i18n-title="ptz.dir.dl">↙</button>
-            <button data-dir="0,-1" data-i18n-title="ptz.dir.d">▼</button>
-            <button data-dir="1,-1" data-i18n-title="ptz.dir.dr">↘</button>
-          </div>
-          <div id="ptzZoomRow" class="ptz-zoom">
-            <button id="ptzZoomIn" data-i18n-title="ptz.zoomIn">＋</button>
-            <span class="muted small" data-i18n="ptz.zoom"></span>
-            <button id="ptzZoomOut" data-i18n-title="ptz.zoomOut">－</button>
-          </div>
-        </div>
-        <label><span><span data-i18n="ptz.speed"></span> <span id="ptzSpeedVal"></span></span>
-          <input type="range" id="ptzSpeed" min="5" max="100" step="5" value="50">
-        </label>
-        <div id="ptzPresetRow" class="row">
-          <select id="ptzPreset" class="grow"></select>
-          <button id="ptzGoPreset" data-i18n="ptz.goto"></button>
-          <button id="ptzReloadPresets" data-i18n-title="ptz.reload">↻</button>
-        </div>
-        <label id="ptzCenterRow" class="inline"><input type="checkbox" id="ptzClickCenter" checked> <span data-i18n="ptz.clickCenter"></span></label>
-        <div class="muted small" data-i18n="ptz.keyboard"></div>
-      </div>
+        <details class="inspector-section">
+          <summary data-i18n="storage.label">Speicher</summary>
+          <div id="inspectorStorage" class="small muted"></div>
+        </details>
 
-      <div class="card">
-        <h3 data-i18n="rec.title"></h3>
-        <div id="recStatus" class="small" data-i18n="rec.loading"></div>
-        <div id="recEnableRow" class="row hidden">
-          <select id="recDisk" data-i18n-title="rec.disk.title"></select>
-          <label class="inline"><input type="checkbox" id="recAudio"> <span data-i18n="rec.audio"></span></label>
-          <button id="btnEnableRec" data-i18n="rec.enable"></button>
-        </div>
-        <div id="recDisableRow" class="row hidden">
-          <button id="btnDisableRec" data-i18n-title="rec.disable.title">
-            <svg class="icon" width="16" height="16"><use href="#ic-stop"/></svg><span data-i18n="rec.disable"></span>
-          </button>
-        </div>
-      </div>
+        <details class="inspector-section" open>
+          <summary data-i18n="exp.history">Exporte</summary>
+          <p class="small muted" data-i18n="exp.historyHint"></p>
+          <ul id="expLinks" class="links"></ul>
+        </details>
       </div>
     </aside>
 

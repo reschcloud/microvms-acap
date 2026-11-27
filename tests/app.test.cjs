@@ -197,7 +197,7 @@ test('visible channels get separate lanes and a timeline click seeks all tiles',
   assert.match(app.state.tiles[1].pipeline.parameters[0], /^recordingid=two$/);
 });
 
-test('timeline lanes have export checkboxes that default on and enable with a selection', async () => {
+test('the selection bar offers channel chips and starts with all channels on', async () => {
   const app = await browser();
   app.state.channelCount = 2;
   app.state.channels = [{ camera: 1 }, { camera: 2 }];
@@ -210,19 +210,21 @@ test('timeline lanes have export checkboxes that default on and enable with a se
   ));
   app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
   await app.refreshRecordings();
-  assert.equal(app.state.timelineCheckboxes.length, 2);
-  assert.equal(app.state.timelineCheckboxes.every(({ input }) => input.checked), true);
-  assert.equal(app.state.timelineCheckboxes.every(({ input }) => input.disabled), true);
-
   app.state.selStart = fixtureTime;
   app.state.selEnd = fixtureTime + 30000;
   app.syncSelectionInputs();
-  assert.equal(app.state.timelineCheckboxes.every(({ input }) => !input.disabled), true);
+  assert.equal(app.element('selectionBar').classList.contains('hidden'), false);
+  assert.equal(app.state.selectionChips.length, 2);
+  assert.equal(app.exportChecked(1), true);
+  assert.equal(app.exportChecked(2), true);
+  assert.equal(app.element('btnExport').disabled, false);
 
-  const first = app.state.timelineCheckboxes[0];
-  first.input.checked = false;
-  first.input.events.change();
-  assert.equal(app.exportChecked(first.channel), false);
+  app.state.selectionChips[0].button.events.click();
+  assert.equal(app.exportChecked(1), false);
+  assert.equal(app.element('btnExport').disabled, false);
+
+  app.element('btnClearSel').events.click();
+  assert.equal(app.element('selectionBar').classList.contains('hidden'), true);
 });
 
 test('multi-channel export writes one file per selected channel and keeps links for the rest', async () => {
@@ -296,6 +298,21 @@ test('recordings expose audio tracks and control the export audio option', async
   await app.refreshRecordings();
   assert.equal(app.state.recordings[0].hasAudio, false);
   assert.equal(app.element('expAudioHint').classList.contains('hidden'), false);
+});
+
+test('the app menu opens the tools inspector and closes again', async () => {
+  const app = await browser();
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  assert.ok(html.includes('id="layoutSeg"'));
+  assert.ok(html.includes('id="btnAppMenu"'));
+  assert.equal(app.element('appMenu').classList.contains('hidden'), true);
+  app.element('btnAppMenu').events.click();
+  assert.equal(app.element('appMenu').classList.contains('hidden'), false);
+  app.element('btnInspector').events.click();
+  assert.equal(app.element('appMenu').classList.contains('hidden'), true);
+  assert.equal(app.element('inspector').classList.contains('open'), true);
+  app.element('btnInspectorClose').events.click();
+  assert.equal(app.element('inspector').classList.contains('open'), false);
 });
 
 test('a late seek does not override returning to live', async () => {
