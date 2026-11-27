@@ -85,6 +85,7 @@
       muteUntilPlaying: false,     // unmute after the next playing event
       lastFrame: null,             // canvas with the last visible frame (pause/snapshot)
       picker: null,                // immediate channel chooser for empty tiles
+      noRecording: false,          // held at a time without footage
       pipeline: null,
       generation: 0,
       intent: null,
@@ -791,9 +792,7 @@
 
   function setStreamStatus(tile, status, msg = '') {
     tile.streamStatus = status;
-    if (tile === activeTile()) {
-      videoMsg(tile, tile.pendingSeek == null ? msg : t('video.seeking'));
-    }
+    videoMsg(tile, tile.pendingSeek == null ? msg : t('video.seeking'));
     updateModeUi(tile);
   }
 
@@ -804,6 +803,8 @@
     tile.syncWall = null;
     tile.baseCt = null;
     tile.lastFrame = null;
+    tile.noRecording = false;
+    tile.el.classList.remove('no-recording');
     setStreamStatus(tile, 'connecting', t('video.connecting'));
     if (!MSL?.Html5VideoPipeline) { setStreamStatus(tile, 'error', t('video.libMissing')); return; }
     const fail = (msg, reconnect = false) => {
@@ -895,6 +896,8 @@
       stopPipeline(tile);
       tile.mode = 'paused';
       tile.rec = null;
+      tile.noRecording = false;
+      tile.el.classList.remove('no-recording');
       setStreamStatus(tile, 'idle', t('tile.empty'));
       return;
     }
@@ -905,12 +908,21 @@
     startPipeline(tile, liveParameters(tile), 0, retryLive);
   }
 
+  function footageAt(channel, time) {
+    const data = state.recordingsByChannel.get(channel);
+    if (!data || !data.complete) return null;
+    if (time < state.viewStart || time >= state.viewEnd) return null;
+    return data.recs.some((rec) => rec.start <= time && time < recStop(rec));
+  }
+
   function holdAt(tile, time, msg) {
     stopPipeline(tile);
     tile.mode = 'paused';
     tile.rec = null;
     tile.pausedAt = time;
-    setStreamStatus(tile, 'idle', msg);
+    tile.noRecording = footageAt(tile.channel, time) === false;
+    tile.el.classList.toggle('no-recording', tile.noRecording);
+    setStreamStatus(tile, 'idle', tile.noRecording ? t('video.noRecording') : msg);
   }
 
   function startRecording(tile, rec, time) {
@@ -958,7 +970,7 @@
     const channel = tile.channel;
     if (clearOldStream) stopPipeline(tile);
     tile.pendingSeek = time;
-    if (tile === activeTile()) videoMsg(tile, t('video.seeking'));
+    videoMsg(tile, t('video.seeking'));
     updateModeUi(tile);
     let result;
     try {

@@ -1202,3 +1202,14 @@ button.primary-soft:hover { background: rgba(10, 132, 255, .26); }
 .tile-empty-cta:active {
   transform: translate(-50%, -50%) scale(.98);
 }
+
+/* Held tiles without footage: dim the picture and show the warning clearly. */
+.video-wrap.no-recording video {
+  opacity: .42;
+  filter: grayscale(.55) brightness(.55);
+}
+.video-wrap.no-recording .video-msg {
+  border-left: 3px solid var(--triggered);
+  background: rgba(20, 24, 30, .88);
+}
+.video-wrap.no-recording .tile-state-dot { background: var(--triggered); }

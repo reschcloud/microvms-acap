@@ -13,7 +13,7 @@ const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').repla
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
-    formatBitrate, totalBitrate, updateBandwidth, updatePing, resolveShortcut, setTheater };
+    formatBitrate, totalBitrate, updateBandwidth, updatePing, resolveShortcut, setTheater, footageAt };
 })();`);
 
 function xml(name, attrs = {}, children = []) {
@@ -432,6 +432,29 @@ test('double-clicking a tile zooms to 1-up and back to the saved multi-view', as
 test('the centered channel button keeps its position while pressed', () => {
   const css = readFileSync(require.resolve('../app/html/style.css'), 'utf8');
   assert.match(css, /\.tile-empty-cta:active\s*\{[^}]*translate\(-50%,\s*-50%\)/);
+});
+
+test('both duplicate channels dim and warn when there is no footage at the held time', async () => {
+  const app = await browser();
+  app.state.channelCount = 2;
+  app.state.channels = [{ camera: 1 }, { camera: 2 }];
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.setView(fixtureTime - 60000, fixtureTime + 60000, { fetch: false });
+  app.state.recordingsByChannel.set(1, { recs: [], unknown: [], complete: true });
+  app.state.recordingsByChannel.set(2, { recs: [], unknown: [], complete: true });
+  assert.equal(app.footageAt(1, fixtureTime), false);
+  assert.equal(app.footageAt(1, fixtureTime - 120000), null); // outside loaded view
+
+  app.route(() => recordings(0));
+  await app.playAt(fixtureTime, { tile: app.state.tiles[0] });
+  await app.playAt(fixtureTime, { tile: app.state.tiles[1] });
+  for (const tile of [app.state.tiles[0], app.state.tiles[1]]) {
+    assert.equal(tile.noRecording, true);
+    assert.equal(tile.el.classList.contains('no-recording'), true);
+    assert.equal(app.element(tile.id === 0 ? 'videoMsg' : `videoMsg${tile.id + 1}`).textContent, 'video.noRecording');
+    assert.equal(app.element(tile.id === 0 ? 'videoMsg' : `videoMsg${tile.id + 1}`).classList.contains('hidden'), false);
+  }
 });
 
 test('a late seek does not override returning to live', async () => {
