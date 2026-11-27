@@ -378,7 +378,7 @@
           <span><i class="lg triggered"></i><span data-i18n="tl.legend.triggered"></span></span>
         </span>
         <div class="tl-group end">
-          <button id="btnExport" class="pill accent" type="button" data-i18n-title="exp.title">
+          <button id="btnExport" class="pill export" type="button" data-i18n-title="exp.title">
             <svg class="icon"><use href="#ic-scissors"/></svg><span id="btnExportLabel" data-i18n="exp.mode">Export</span>
           </button>
         </div>
@@ -386,7 +386,7 @@
       <div id="selectionBar" class="selection-bar hidden">
         <div class="selection-main">
           <span id="selRange" class="selection-range"></span>
-          <div id="selChannels" class="selection-channels"></div>
+          <span id="selWarn" class="selection-warning hidden" role="alert"></span>
         </div>
         <div class="selection-actions">
           <details id="exportOptions" class="export-options">

@@ -20,7 +20,9 @@
   --dur: 160ms;
 
   --live: #e82127;
-  --triggered: #f5a623;
+  --triggered: #ff8a00;        /* orange: events, clearly apart from the yellow export frame */
+  --export: #ffd60a;
+  --on-export: #171a20;
   --scheduled: #8f7cf0;
   --other: #8e8e93;
   --ok: #34c759;
@@ -44,6 +46,7 @@
   --accent-hover: #6a91f7;
   --continuous: #4d7cf5;
   --sel: rgba(77, 124, 245, .22);
+  --export-sel: rgba(255, 214, 10, .22);
   --tl-bg: #242529;
   --tl-future: rgba(0, 0, 0, .35);
   --tl-playhead: #ffffff;
@@ -64,6 +67,7 @@
   --accent-hover: #3259c4;
   --continuous: #3e6ae1;
   --sel: rgba(62, 106, 225, .16);
+  --export-sel: rgba(255, 204, 0, .28);
   --tl-bg: #f4f4f4;
   --tl-future: rgba(0, 0, 0, .06);
   --tl-playhead: #171a20;
@@ -138,6 +142,9 @@ label input:not([type="checkbox"]), label select { width: 100%; color: var(--tex
 .pill { height: var(--control); white-space: nowrap; }
 .pill.accent, button.accent { background: var(--accent); color: var(--on-accent); }
 .pill.accent:hover, button.accent:hover { background: var(--accent-hover); }
+/* Export controls share the yellow of the export frame. */
+.pill.export { background: var(--export); color: var(--on-export); }
+.pill.export:hover { background: #ffe043; }
 
 .icon-button {
   width: var(--control);
@@ -504,9 +511,10 @@ button.tile-icon.audio-on { background: var(--accent); }
 .tl-label { display: flex; align-items: center; height: 36px; min-width: 0; color: var(--text); }
 .tl-label.head { height: 28px; }
 .tl-label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+label.tl-label { flex-direction: row; gap: 10px; color: var(--text); cursor: pointer; }
+.tl-label input[type="checkbox"] { flex: none; accent-color: var(--export); }
 .tl-canvas-wrap { position: relative; flex: 1; min-width: 0; }
 #timeline { display: block; width: 100%; height: 64px; border-radius: var(--radius-s); cursor: grab; touch-action: pan-y; }
-#timeline.selecting, #timeline.select-mode { cursor: crosshair; }
 .tl-tooltip {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -544,13 +552,13 @@ button.tile-icon.audio-on { background: var(--accent); }
   margin-top: 12px;
   padding: 10px 10px 10px 16px;
   border-radius: var(--radius-s);
-  background: var(--sel);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 2px var(--export);
 }
 .selection-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .selection-range { font-weight: 600; font-variant-numeric: tabular-nums; }
-.selection-channels { display: flex; gap: 6px; flex-wrap: wrap; }
-.chip { min-height: 34px; height: 34px; border-radius: 999px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); color: var(--muted); }
-.chip[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.selection-warning { font-weight: 600; }
+.selection-warning::before { content: "⚠ "; color: var(--triggered); }
 .selection-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .selection-info { flex-basis: 100%; }
 .selection-info:empty { display: none; }

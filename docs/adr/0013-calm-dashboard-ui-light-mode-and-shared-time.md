@@ -35,11 +35,16 @@ UI, in the style of a car dashboard:
   "Choose channel". Overlays on video stay dark in both themes.
 - **Transport:** play/pause sits between two equal halves, so it is always
   exactly centered under the tiles. The Live button always reads "Live".
-- **Export is a mode.** "Export" turns on range selection (every drag in the
-  timeline selects, Alt pans); the same button then reads "Export selection" and
-  is enabled once a range exists. × or Esc leaves the mode. There is no
-  automatic one-minute clip and no typed time jump any more. The legend calls
-  blue "Continuous".
+- **Export is a mode.** Outside it, dragging the timeline only pans; no range
+  can be drawn. "Export" opens a yellow frame from one minute before to one
+  minute after the playhead (never past now) and zooms the view to ±5 min; the
+  frame edges resize it, its body moves it, a click outside only seeks. The same
+  yellow button then reads "Export selection" and starts the export. Channels
+  are chosen with checkboxes beside the lanes (multi-channel only). More than
+  one hour of footage (duration × channels) shows a warning in the export bar.
+  × or Esc leaves the mode. Events are orange so they never look like the frame.
+  No "jumping to …" toast: the moving playhead already shows it. The legend
+  calls blue "Continuous".
 - **Light mode.** Appearance is Auto (follows the OS), Light, or Dark, stored as
   `minivms.theme`. An inline script in `<head>` applies it before the first
   paint. Both palettes define the same tokens; the timeline canvas re-reads its

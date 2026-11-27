@@ -205,34 +205,31 @@ test('visible channels get separate lanes and a timeline click seeks all tiles',
   assert.match(app.state.tiles[1].pipeline.parameters[0], /^recordingid=two$/);
 });
 
-test('the selection bar offers channel chips and starts with all channels on', async () => {
+test('export checkboxes beside the lanes choose the channels and start all on', async () => {
   const app = await browser();
-  app.state.channelCount = 2;
-  app.state.channels = [{ camera: 1 }, { camera: 2 }];
-  app.state.sourceCatalog = ['1', '2'];
+  twoChannels(app);
   app.state.tiles[1].channel = 2;
   app.state.tiles[1].visible = true;
-  app.route(() => recordings(2,
-    recording('one', fixtureTime, fixtureTime + 60000, { source: '1' }),
-    recording('two', fixtureTime, fixtureTime + 60000, { source: '2' }),
-  ));
   app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
-  await app.refreshRecordings();
-  app.state.selStart = fixtureTime;
-  app.state.selEnd = fixtureTime + 30000;
-  app.syncSelectionInputs();
+  assert.equal(app.state.exportBoxes.length, 0, 'no checkboxes outside the export mode');
+  app.element('btnExport').events.click();
   assert.equal(app.element('selectionBar').classList.contains('hidden'), false);
-  assert.equal(app.state.selectionChips.length, 2);
-  assert.equal(app.exportChecked(1), true);
-  assert.equal(app.exportChecked(2), true);
+  assert.equal(app.state.exportBoxes.length, 2);
+  assert.ok(app.state.exportBoxes.every(({ input }) => input.checked));
   assert.equal(app.element('btnExport').disabled, false);
 
-  app.state.selectionChips[0].button.events.click();
+  const [first, second] = app.state.exportBoxes;
+  first.input.checked = false;
+  first.input.events.change();
   assert.equal(app.exportChecked(1), false);
   assert.equal(app.element('btnExport').disabled, false);
+  second.input.checked = false;
+  second.input.events.change();
+  assert.equal(app.element('btnExport').disabled, true, 'nothing to export');
 
   app.element('btnClearSel').events.click();
   assert.equal(app.element('selectionBar').classList.contains('hidden'), true);
+  assert.equal(app.state.exportBoxes.length, 0);
 });
 
 test('multi-channel export writes one file per selected channel and keeps links for the rest', async () => {
@@ -403,41 +400,55 @@ test('an unplayable auto profile falls back to the camera default once', async (
   assert.equal(tile.streamStatus, 'error');
 });
 
-test('the export button first turns on range selection, then exports the drawn range', async () => {
+test('export opens a frame of one minute around the playhead that can be resized and moved', async () => {
   const app = await browser();
+  const T = fixtureTime + 120000;
+  app.route(() => recordings(1, recording('clip', fixtureTime, fixtureTime + 600000)));
+  await app.playAt(T);
+  app.setView(fixtureTime - 3600000, fixtureTime + 3600000, { fetch: false });
   const button = app.element('btnExport');
   assert.equal(app.element('btnExportLabel').textContent, 'exp.mode');
   button.events.click();
-  // No automatic range: the mode is on, the button waits for a selection.
   assert.equal(app.state.selectMode, true);
-  assert.equal(app.state.selStart, null);
+  assert.equal(app.state.selStart, T - 60000);
+  assert.equal(app.state.selEnd, T + 60000);
+  // The view zooms in so the frame edges can be grabbed.
+  assert.deepEqual([app.state.viewStart, app.state.viewEnd], [T - 300000, T + 300000]);
   assert.equal(app.element('btnExportLabel').textContent, 'exp.saveSelection');
-  assert.equal(button.disabled, true);
-  assert.equal(app.element('selectionBar').classList.contains('hidden'), false);
-  assert.equal(app.element('selRange').textContent, 'exp.selectHint');
-
-  // In export mode a drag inside a lane selects instead of panning.
-  app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
-  const view = [app.state.viewStart, app.state.viewEnd];
-  const canvas = app.element('timeline');
-  canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: 100, offsetY: 50 });
-  canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: 500, offsetY: 50 });
-  canvas.events.pointerup({ isPrimary: true, button: 0, pointerId: 1, offsetX: 500, offsetY: 50 });
-  assert.deepEqual([app.state.viewStart, app.state.viewEnd], view);
-  assert.ok(app.state.selEnd - app.state.selStart > 20000);
   assert.equal(button.disabled, false);
+  // The duration appears once (in the bar), not again in the info line.
+  assert.match(app.element('selRange').textContent, /2 min 00 s/);
+  assert.equal(app.element('expInfo').textContent, '');
 
-  app.route(() => recordings(1, recording('clip', fixtureTime, fixtureTime + 60000)));
+  const canvas = app.element('timeline');
+  const x = (time) => ((time - app.state.viewStart) / (app.state.viewEnd - app.state.viewStart)) * 800;
+  const px = (ms) => (ms / (app.state.viewEnd - app.state.viewStart)) * 800;
+  const drag = (from, to) => {
+    canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: from, offsetY: 40 });
+    canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: to, offsetY: 40 });
+    canvas.events.pointerup({ isPrimary: true, button: 0, pointerId: 1, offsetX: to, offsetY: 40 });
+  };
+  drag(x(T + 60000), x(T + 60000) + px(30000));  // end edge: +30 s
+  assert.equal(app.state.selEnd, T + 90000);
+  drag(x(T - 60000), x(T - 60000) - px(10000));  // start edge: -10 s
+  assert.equal(app.state.selStart, T - 70000);
+  drag(x(T), x(T) + px(20000));                  // body: both +20 s
+  assert.deepEqual([app.state.selStart, app.state.selEnd], [T - 50000, T + 110000]);
+
+  // A click outside the frame seeks but keeps the frame.
+  const click = { isPrimary: true, button: 0, pointerId: 2, offsetX: 700, offsetY: 40 };
+  canvas.events.pointerdown(click);
+  canvas.events.pointerup(click);
+  assert.deepEqual([app.state.selStart, app.state.selEnd], [T - 50000, T + 110000]);
+
   button.events.click();
   await ticks();
   assert.match(app.downloads[0], /recordingid=clip/);
 
-  // The close button leaves the mode and drops the range.
   app.element('btnClearSel').events.click();
   assert.equal(app.state.selectMode, false);
   assert.equal(app.state.selStart, null);
   assert.equal(app.element('btnExportLabel').textContent, 'exp.mode');
-  assert.equal(app.element('selectionBar').classList.contains('hidden'), true);
 });
 
 test('play/pause sits between two equal halves and held tiles without footage show no time', () => {
@@ -752,23 +763,18 @@ test('snapshot uses the live JPEG endpoint and playback frames without a live JP
   assert.match(app.downloads[2], /^data:image\/jpeg/);
 });
 
-test('dragging the time ruler creates an export range and a click clears it', async () => {
+test('outside the export mode a drag in the timeline only pans', async () => {
   const app = await browser();
   app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
   const canvas = app.element('timeline');
-  const down = { isPrimary: true, button: 0, pointerId: 1, offsetX: 100, offsetY: 5 };
-  const move = { isPrimary: true, button: 0, pointerId: 1, offsetX: 320, offsetY: 5 };
-  canvas.events.pointerdown(down);
-  canvas.events.pointermove(move);
-  canvas.events.pointerup(move);
-  assert.ok(app.state.selStart != null);
-  assert.ok(app.state.selEnd > app.state.selStart);
-
-  const click = { isPrimary: true, button: 0, pointerId: 2, offsetX: 200, offsetY: 32 };
-  canvas.events.pointerdown(click);
-  canvas.events.pointerup(click);
-  assert.equal(app.state.selStart, null);
-  assert.equal(app.state.selEnd, null);
+  for (const offsetY of [5, 40]) {       // time ruler and lane
+    const before = app.state.viewStart;
+    canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: 100, offsetY, shiftKey: true });
+    canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: 320, offsetY, shiftKey: true });
+    canvas.events.pointerup({ isPrimary: true, button: 0, pointerId: 1, offsetX: 320, offsetY, shiftKey: true });
+    assert.equal(app.state.selStart, null);
+    assert.ok(app.state.viewStart < before, 'the view moved instead');
+  }
 });
 
 test('timeline messages sit in the timeline panel and vanish when empty', async () => {
@@ -1117,15 +1123,18 @@ test('a recording without an audio track is requested without audio', async () =
   assert.ok(app.state.pipeline.parameters.includes('audio=1'));
 });
 
-test('a timeline selection started in the future ends at now', async () => {
+test('the export frame never reaches into the future', async () => {
   const app = await browser();
   const now = Date.now();
-  app.setView(now - 60000, now + 60000, { fetch: false });
+  app.setView(now - 300000, now + 100000, { fetch: false });
+  app.element('btnExport').events.click();       // live: the frame ends at now
+  assert.ok(app.state.selEnd <= Date.now());
+  assert.ok(app.state.selEnd - app.state.selStart >= 59000);
   const canvas = app.element('timeline');
-  canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: 700, offsetY: 5 });
-  canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: 100, offsetY: 5 });
-  assert.ok(app.state.selStart <= Date.now());
-  assert.ok(app.state.selEnd < app.state.selStart);
+  const endX = ((app.state.selEnd - app.state.viewStart) / (app.state.viewEnd - app.state.viewStart)) * 800;
+  canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: endX, offsetY: 40 });
+  canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: 790, offsetY: 40 });
+  assert.ok(app.state.selEnd <= Date.now());
 });
 
 test('the production script has no debug logging', () => {
@@ -1223,4 +1232,27 @@ test('a click into a gap moves the shared clock to the earliest footage of any t
   assert.equal(overview.mode, 'playback');
   assert.equal(overview.pipeline.parameters[0], 'recordingid=later');
   assert.equal(overview.startWall, T + 125000);
+});
+
+test('a long export range shows a warning in the export bar', async () => {
+  const app = await browser();
+  twoChannels(app);
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.state.selStart = fixtureTime;
+  app.state.selEnd = fixtureTime + 20 * 60000;    // 20 min x 2 channels: fine
+  app.syncSelectionInputs();
+  assert.equal(app.element('selWarn').classList.contains('hidden'), true);
+  app.state.selEnd = fixtureTime + 40 * 60000;    // 40 min x 2 channels = 80 min
+  app.syncSelectionInputs();
+  assert.equal(app.element('selWarn').classList.contains('hidden'), false);
+  assert.match(app.element('selWarn').textContent, /exp\.long/);
+});
+
+test('a seek into a gap jumps silently to the next recording', async () => {
+  const app = await browser();
+  app.route(() => recordings(1, recording('next', fixtureTime + 60000, fixtureTime + 120000)));
+  await app.playAt(fixtureTime);
+  assert.equal(app.state.startWall, fixtureTime + 60000);
+  assert.doesNotMatch(app.element('toast').textContent, /jumpTo/);
 });

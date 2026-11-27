@@ -48,7 +48,7 @@
     recordingsByChannel: new Map(),
     unassignedRecordings: [],
     exportChannels: new Map(),   // channel -> export checkbox
-    selectionChips: [],          // { channel, button } in the selection bar
+    exportBoxes: [],             // { channel, input }: export checkboxes beside the lanes
     selectMode: false,           // export mode: dragging the timeline selects a range
     theater: false,
     zoomReturn: null,            // saved multi-view state while a tile is zoomed to 1-up
@@ -1036,11 +1036,7 @@
       videoMsg(tile, t('video.noRecording'));
       return;
     }
-    if (rec.start > time) {
-      toast(t('toast.jumpTo', { time: fmtTime(rec.start) }));
-      time = rec.start;
-    }
-    startRecording(tile, rec, time);
+    startRecording(tile, rec, Math.max(time, rec.start));
   }
 
   async function onRecordingEnded(tile = activeTile()) {
@@ -1170,7 +1166,6 @@
     const starts = results.map((r, i) => (r.rec && current.includes(tiles[i]) ? Math.max(time, r.rec.start) : null))
       .filter((start) => start != null);
     const target = starts.length ? Math.min(...starts) : time;
-    if (target > time) toast(t('toast.jumpTo', { time: fmtTime(target) }));
 
     tiles.forEach((tile, i) => {
       if (!current.includes(tile)) return;
@@ -1474,7 +1469,8 @@
       triggered: cssVar('--triggered', '#f59e0b'),
       scheduled: cssVar('--scheduled', '#a855f7'),
       other: cssVar('--other', '#60c8bd'),
-      sel: cssVar('--sel', 'rgba(255,204,51,.25)'),
+      sel: cssVar('--export-sel', 'rgba(255,214,10,.22)'),
+      exportEdge: cssVar('--export', '#ffd60a'),
       accent: cssVar('--accent', '#ffcc33'),
       live: cssVar('--live', '#e5484d'),
       font: cssVar('--font', 'system-ui, sans-serif'),
@@ -1548,15 +1544,31 @@
     const head = document.createElement('div');
     head.className = 'tl-label head';
     box.appendChild(head);
+    state.exportBoxes = [];
+    const boxes = state.selectMode && lanes.length > 1;
     for (const lane of lanes) {
-      const row = document.createElement('div');
+      const row = document.createElement(boxes ? 'label' : 'div');
       row.className = 'tl-label';
+      if (boxes) {
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = exportChecked(lane.channel);
+        input.addEventListener('change', () => {
+          state.exportChannels.set(lane.channel, input.checked);
+          renderSelectionBar();
+        });
+        row.appendChild(input);
+        state.exportBoxes.push({ channel: lane.channel, input });
+      }
       const name = document.createElement('span');
       name.textContent = lane.name;
       row.appendChild(name);
       box.appendChild(row);
     }
   }
+
+  const LONG_EXPORT = HOUR;         // footage (duration x channels) that earns a warning
+  const SELECT_MIN = 1000;          // the export frame never collapses below one second
 
   /**
    * Export is a mode: "Export" turns on range selection, the same button then reads
@@ -1568,11 +1580,9 @@
     if (active) state.selectMode = true;
     const mode = state.selectMode;
     bar.classList.toggle('hidden', !mode);
-    canvas.classList.toggle('select-mode', mode);
     $('btnExportLabel').textContent = t(mode ? 'exp.saveSelection' : 'exp.mode');
-    state.selectionChips = [];
-    const box = $('selChannels');
-    box.replaceChildren();
+    const warning = $('selWarn');
+    warning.classList.add('hidden');
     if (!active) {
       $('selRange').textContent = mode ? t('exp.selectHint') : '';
       $('btnExport').disabled = mode || Boolean(exportAbort);
@@ -1582,28 +1592,32 @@
     const b = Math.max(state.selStart, state.selEnd);
     $('selRange').textContent = `${fmtDateTime(a)} – ${fmtTime(b)} · ${fmtDuration(b - a)}`;
 
-    const channels = timelineChannels();
-    for (const channel of channels) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'chip';
-      button.textContent = channelName(channel);
-      button.setAttribute('aria-pressed', String(exportChecked(channel)));
-      button.addEventListener('click', () => {
-        state.exportChannels.set(channel, !exportChecked(channel));
-        renderSelectionBar();
-      });
-      box.appendChild(button);
-      state.selectionChips.push({ channel, button });
+    const channels = timelineChannels().filter((channel) => exportChecked(channel));
+    const footage = (b - a) * channels.length;
+    if (footage > LONG_EXPORT) {
+      warning.textContent = t('exp.long', { d: fmtDuration(footage) });
+      warning.classList.remove('hidden');
     }
-    $('btnExport').disabled = Boolean(exportAbort) || !channels.some((channel) => exportChecked(channel));
+    $('btnExport').disabled = Boolean(exportAbort) || !channels.length;
   }
 
+  /**
+   * "Export" opens a frame from one minute before to one minute after the playhead
+   * (never past now); its edges and body can be dragged. Leaving drops the frame.
+   */
   function setSelectMode(on) {
     state.selectMode = on;
-    if (!on && selectionActive()) { clearSelection(); return; }
-    renderSelectionBar();
-    draw();
+    if (on && !selectionActive()) {
+      const now = Date.now();
+      const at = Math.min(Math.round(activeTile().waitingFor ? sharedClockTime() : currentWall()), now);
+      state.selStart = at - MIN;
+      state.selEnd = Math.min(at + MIN, now);
+      // Zoom so that the frame is wide enough to grab its edges.
+      setView(at - 5 * MIN, at + 5 * MIN);
+      syncSelectionInputs();
+    }
+    if (!on && selectionActive()) clearSelection();
+    resizeCanvas();               // labels gain or lose their export checkboxes
   }
 
   /** The toolbar button: first turn on the range selection, then export the range. */
@@ -1714,9 +1728,12 @@
       const x2 = xOf(Math.max(state.selStart, state.selEnd));
       ctx.fillStyle = COLORS.sel;
       ctx.fillRect(x1, 0, x2 - x1, H);
-      ctx.strokeStyle = COLORS.accent;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(x1 + 0.5, 0.5, x2 - x1 - 1, H - 1);
+      // Thick edges are the handles for resizing the frame.
+      ctx.fillStyle = COLORS.exportEdge;
+      ctx.fillRect(x1 - 2, 0, 4, H);
+      ctx.fillRect(x2 - 2, 0, 4, H);
+      ctx.fillRect(x1, 0, x2 - x1, 2);
+      ctx.fillRect(x1, H - 2, x2 - x1, 2);
     }
 
     const xp = xOf(activeTile().waitingFor ? sharedClockTime() : currentWall());
@@ -1858,19 +1875,50 @@
   }
 
   let drag = null;
+  const EDGE_PX = 10;
+
+  /** Which part of the export frame is under x: 'start' / 'end' edge, 'move' body, or null. */
+  function frameHit(x) {
+    if (!state.selectMode || !selectionActive()) return null;
+    const a = xOf(Math.min(state.selStart, state.selEnd));
+    const b = xOf(Math.max(state.selStart, state.selEnd));
+    const da = Math.abs(x - a), db = Math.abs(x - b);
+    // On a narrow frame both edges are in reach: take the nearer one.
+    if (Math.min(da, db) <= EDGE_PX) return da < db ? 'start' : 'end';
+    return x > a && x < b ? 'move' : null;
+  }
+
+  function editFrame(part, range0, dt) {
+    let [a, b] = range0;
+    if (part === 'start') a = Math.min(a + dt, b - SELECT_MIN);
+    else if (part === 'end') b = Math.max(b + dt, a + SELECT_MIN);
+    else { a += dt; b += dt; }
+    const now = Date.now();           // no footage in the future
+    if (b > now) {
+      if (part === 'move') a -= b - now;
+      b = now;
+      a = Math.min(a, b - SELECT_MIN);
+    }
+    state.selStart = Math.round(a);
+    state.selEnd = Math.round(b);
+    syncSelectionInputs();
+    draw();
+  }
+
+  const FRAME_CURSORS = { start: 'ew-resize', end: 'ew-resize', move: 'move' };
+
   canvas.addEventListener('pointerdown', (ev) => {
     if (!ev.isPrimary || ev.button !== 0) return;
     canvas.setPointerCapture(ev.pointerId);
-    const mode = ev.altKey ? 'pan'
-      : (state.selectMode || ev.offsetY < LANE_TOP || ev.shiftKey ? 'select' : 'pan');
+    const part = frameHit(ev.offsetX);
     drag = {
       id: ev.pointerId, x0: ev.offsetX, view0: [state.viewStart, state.viewEnd],
-      moved: false, mode, t0: tOf(ev.offsetX),
+      moved: false, mode: part || 'pan',
+      frame0: [Math.min(state.selStart, state.selEnd), Math.max(state.selStart, state.selEnd)],
     };
-    if (mode === 'select') canvas.classList.add('selecting');
   });
   canvas.addEventListener('pointermove', (ev) => {
-    if (!drag) canvas.style.cursor = ev.offsetY < LANE_TOP ? 'col-resize' : 'grab';
+    if (!drag) canvas.style.cursor = FRAME_CURSORS[frameHit(ev.offsetX)] || 'grab';
     const tip = $('tlTooltip');
     const at = tOf(ev.offsetX);
     tip.textContent = `${fmtDateTime(at)} ${fmtOffset(at)}`;
@@ -1880,16 +1928,9 @@
     const dx = ev.offsetX - drag.x0;
     if (Math.abs(dx) > 3) drag.moved = true;
     if (!drag.moved) return;
-    if (drag.mode === 'select') {
-      // There is no footage in the future: both ends stop at "now".
-      state.selStart = Math.min(drag.t0, Date.now());
-      state.selEnd = Math.min(tOf(ev.offsetX), Date.now());
-      syncSelectionInputs();
-      draw();
-    } else {
-      const dt = (dx / canvasWidth()) * (drag.view0[1] - drag.view0[0]);
-      setView(drag.view0[0] - dt, drag.view0[1] - dt);
-    }
+    const dt = (dx / canvasWidth()) * (drag.view0[1] - drag.view0[0]);
+    if (drag.mode === 'pan') setView(drag.view0[0] - dt, drag.view0[1] - dt);
+    else editFrame(drag.mode, drag.frame0, dt);
   });
   function tileForChannel(channel) {
     return visibleTiles().find((tile) => tile.channel === channel) || activeTile();
@@ -1899,9 +1940,7 @@
     if (drag?.id !== ev.pointerId) return;
     const d = drag;
     drag = null;
-    canvas.classList.remove('selecting');
     if (d.moved) return;
-    clearSelection();
     const time = Math.round(tOf(ev.offsetX));
     const hit = timelineRecordingAt(ev.offsetX, ev.offsetY, time);
     if (hit?.rec) {
@@ -1922,7 +1961,6 @@
   for (const type of ['pointercancel', 'lostpointercapture']) canvas.addEventListener(type, (ev) => {
     if (drag?.id !== ev.pointerId) return;
     drag = null;
-    canvas.classList.remove('selecting');
   });
   canvas.addEventListener('pointerleave', () => $('tlTooltip').classList.add('hidden'));
   canvas.addEventListener('wheel', (ev) => {
@@ -1939,7 +1977,6 @@
     $('expStart').value = toLocalInput(a);
     $('expEnd').value = toLocalInput(b);
     dragExportRange = { a, b, startInput: $('expStart').value, endInput: $('expEnd').value };
-    if (!exportAbort) $('expInfo').textContent = t('exp.duration', { d: fmtDuration(b - a) });
     renderSelectionBar();
   }
 
@@ -1947,8 +1984,8 @@
     const [a, b] = selectedExportRange();
     state.selStart = Number.isFinite(a) && b > a ? a : null;
     state.selEnd = state.selStart == null ? null : b;
-    if (!exportAbort) $('expInfo').textContent = !Number.isFinite(a) || !Number.isFinite(b) ? ''
-      : b > a ? t('exp.duration', { d: fmtDuration(b - a) }) : t('exp.endBeforeStart');
+    if (!exportAbort) $('expInfo').textContent = Number.isFinite(a) && Number.isFinite(b) && b <= a
+      ? t('exp.endBeforeStart') : '';
     renderSelectionBar();
     draw();
   }
@@ -2107,7 +2144,6 @@
       if (!channels.length) { toast(t('exp.noChannels'), true); return; }
     }
     if (usePw && !includeAudio) { toast(t('exp.audio.zip'), true); return; }
-    if (b - a > 6 * HOUR) toast(t('exp.large', { d: fmtDuration(b - a) }));
 
     const name = ($('expName').value.trim() || 'export').replace(/[^\w.-]+/g, '_');
     const request = new AbortController();
