@@ -263,7 +263,8 @@
     };
     let held = null;
     document.addEventListener('keydown', (ev) => {
-      if (!active() || held || ev.repeat) return;
+      // Arrows belong to the timeline by default; Alt keeps the PTZ keyboard path.
+      if (!active() || held || ev.repeat || !ev.altKey) return;
       if (/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
       const fn = keys[ev.key];
       if (!fn) return;

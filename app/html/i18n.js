@@ -62,6 +62,30 @@
       'inspector.title': 'Werkzeuge',
       'inspector.open': 'Werkzeuge',
       'help.open': 'Hilfe',
+      'help.title': 'Tastatur und Bedienung',
+      'help.playback': 'Wiedergabe',
+      'help.view': 'Ansicht',
+      'help.export': 'Sichern',
+      'help.gestures': 'Maus und Touch',
+      'help.pause': 'Pause / Weiter',
+      'help.live': 'Live',
+      'help.step5': '5 s zurück / vor',
+      'help.step30': '30 s zurück / vor',
+      'help.layout': 'Raster wechseln',
+      'help.auto': 'Auto-Layout',
+      'help.theater': 'Vollbild / Theater',
+      'help.zoom': 'Timeline zoomen',
+      'help.exportSelection': 'Auswahl exportieren',
+      'help.close': 'Schließen / Auswahl löschen',
+      'help.openHelp': 'Diese Hilfe',
+      'help.gestureRuler': 'Im Zeitlineal ziehen: Bereich wählen',
+      'help.gestureLane': 'In einer Spur ziehen: verschieben',
+      'help.gestureWheel': 'Mausrad / Pinch: zoomen',
+      'help.gesturePtz': 'Alt+Pfeile: PTZ auf der aktiven Live-Kachel',
+      'help.foot': 'Tooltips erscheinen beim Überfahren oder per Tastaturfokus.',
+      'help.needsSelection': 'Zuerst einen Zeitbereich in der Timeline wählen.',
+      'theater.toggle': 'Vollbild / Theater (F)',
+      'theater.esc': 'Esc beendet das Vollbild.',
       'close': 'Schließen',
       'tile.menu': 'Kacheloptionen',
       'tile.channel': 'Kanal',
@@ -204,7 +228,7 @@
       'ptz.goto': 'Anfahren',
       'ptz.reload': 'Presets neu laden',
       'ptz.clickCenter': 'Klick ins Bild zentriert, Mausrad zoomt',
-      'ptz.keyboard': 'Tastatur: Pfeiltasten, + / −',
+      'ptz.keyboard': 'Tastatur: Alt+Pfeiltasten, Alt+ + / −',
       'ptz.noPresets': '– keine Presets –',
       'ptz.presetsUnavailable': '– nicht verfügbar –',
       'ptz.error': 'PTZ: {msg}',
@@ -266,6 +290,30 @@
       'inspector.title': 'Tools',
       'inspector.open': 'Tools',
       'help.open': 'Help',
+      'help.title': 'Keyboard and controls',
+      'help.playback': 'Playback',
+      'help.view': 'View',
+      'help.export': 'Save',
+      'help.gestures': 'Mouse and touch',
+      'help.pause': 'Pause / resume',
+      'help.live': 'Live',
+      'help.step5': 'Back / forward 5 s',
+      'help.step30': 'Back / forward 30 s',
+      'help.layout': 'Change grid',
+      'help.auto': 'Auto layout',
+      'help.theater': 'Fullscreen / theater',
+      'help.zoom': 'Zoom timeline',
+      'help.exportSelection': 'Export selection',
+      'help.close': 'Close / clear selection',
+      'help.openHelp': 'This help',
+      'help.gestureRuler': 'Drag the time ruler: select a range',
+      'help.gestureLane': 'Drag a lane: pan',
+      'help.gestureWheel': 'Wheel / pinch: zoom',
+      'help.gesturePtz': 'Alt+arrows: PTZ on the active live tile',
+      'help.foot': 'Tooltips appear on hover or keyboard focus.',
+      'help.needsSelection': 'Select a time range in the timeline first.',
+      'theater.toggle': 'Fullscreen / theater (F)',
+      'theater.esc': 'Esc leaves fullscreen.',
       'close': 'Close',
       'tile.menu': 'Tile options',
       'tile.channel': 'Channel',
@@ -408,7 +456,7 @@
       'ptz.goto': 'Go to',
       'ptz.reload': 'Reload presets',
       'ptz.clickCenter': 'Click in image to center, wheel to zoom',
-      'ptz.keyboard': 'Keyboard: arrow keys, + / −',
+      'ptz.keyboard': 'Keyboard: Alt+arrows, Alt+ + / −',
       'ptz.noPresets': '– no presets –',
       'ptz.presetsUnavailable': '– unavailable –',
       'ptz.error': 'PTZ: {msg}',
@@ -441,7 +489,16 @@
     const r = root || document;
     r.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
     r.querySelectorAll('[data-i18n-html]').forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });
-    r.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+    r.querySelectorAll('[data-i18n-title]').forEach((el) => {
+      const text = t(el.dataset.i18nTitle);
+      if (el.matches && el.matches('button, summary, input, select, a')) {
+        el.dataset.tip = text;
+        el.setAttribute('aria-label', text);
+        el.removeAttribute('title');
+      } else {
+        el.title = text;
+      }
+    });
     r.querySelectorAll('[data-i18n-placeholder]').forEach((el) => { el.placeholder = t(el.dataset.i18nPlaceholder); });
   }
 

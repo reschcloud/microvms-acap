@@ -49,6 +49,7 @@
     unassignedRecordings: [],
     exportChannels: new Map(),   // channel -> export checkbox
     selectionChips: [],          // { channel, button } in the selection bar
+    theater: false,
     viewStart: 0,
     viewEnd: 0,
     selStart: null,
@@ -1026,7 +1027,9 @@
     btn.disabled = tile.channel == null || !supported;
     btn.classList.toggle('audio-on', on);
     btn.setAttribute('aria-pressed', String(on));
-    btn.title = t(!supported ? 'tile.audio.unavailable' : on ? 'tile.audio.on' : 'tile.audio.off');
+    const label = t(!supported ? 'tile.audio.unavailable' : on ? 'tile.audio.on' : 'tile.audio.off');
+    btn.setAttribute('data-tip', label);
+    btn.setAttribute('aria-label', label);
     use.setAttribute('href', on ? '#ic-speaker' : '#ic-speaker-off');
   }
 
@@ -1145,7 +1148,7 @@
   }
 
   function timelineLanes() {
-    return timelineChannels().map((channel) => {
+    const lanes = timelineChannels().map((channel) => {
       const data = state.recordingsByChannel.get(channel);
       return {
         channel,
@@ -1155,6 +1158,12 @@
         complete: data ? data.complete : true,
       };
     });
+    if (state.theater) {
+      const active = activeTile().channel;
+      const focused = lanes.filter((lane) => lane.channel === active);
+      if (focused.length) return focused;
+    }
+    return lanes;
   }
 
   const laneGeometry = (index) => ({ y: LANE_TOP + index * LANE_HEIGHT, height: LANE_HEIGHT });
@@ -2085,7 +2094,7 @@
   $('btnBack5').addEventListener('click', () => skipBackAll(SKIP_SHORT));
   $('btnFwd').addEventListener('click', () => skipForwardAll(SKIP));
   $('btnRetryPlayback').addEventListener('click', retryPlaybackAll);
-  $('btnSnapshot').addEventListener('click', () => {
+  function takeSnapshot() {
     const tile = activeTile();
     if (tile.channel == null) return;
     if (tile.mode === 'live' && tile.pendingSeek == null && tile.streamStatus === 'playing') {
@@ -2096,7 +2105,9 @@
       return;
     }
     snapshotFromTile(tile);
-  });
+  }
+
+  $('btnSnapshot').addEventListener('click', takeSnapshot);
   function setLayout(value) {
     const wasLive = visibleTiles().length > 0
       && visibleTiles().every((tile) => tile.mode === 'live' && tile.pendingSeek == null);
@@ -2148,6 +2159,185 @@
   setAppMenu(false);
   setInspector(store.get('inspector') === '1');
 
+  // ------------------------------------------------------------ Help and theater
+
+  const bodyClass = (name, on) => document.body?.classList?.toggle?.(name, on);
+
+  function openHelp() {
+    setAppMenu(false);
+    const dialog = $('helpDialog');
+    if (dialog.showModal) dialog.showModal();
+    else dialog.classList.remove('hidden');
+  }
+
+  function closeHelp() {
+    const dialog = $('helpDialog');
+    if (dialog.close) dialog.close();
+    else dialog.classList.add('hidden');
+  }
+
+  let theaterIdleTimer = null;
+
+  function resetTheaterIdle() {
+    clearTimeout(theaterIdleTimer);
+    bodyClass('theater-idle', false);
+    if (!state.theater) return;
+    theaterIdleTimer = setTimeout(() => {
+      const focused = document.activeElement;
+      if (focused?.closest?.('.controls, .timeline-panel, .inspector, .app-menu, .help-dialog')) return;
+      bodyClass('theater-idle', true);
+    }, 2500);
+  }
+
+  function setTheater(on) {
+    state.theater = on;
+    bodyClass('theater', on);
+    $('btnTheater').setAttribute('aria-pressed', String(on));
+    if (on) {
+      setAppMenu(false);
+      setInspector(false);
+      const promise = document.documentElement?.requestFullscreen?.();
+      promise?.catch?.(() => {});
+      resetTheaterIdle();
+      toast(t('theater.esc'));
+    } else {
+      const promise = document.exitFullscreen?.();
+      promise?.catch?.(() => {});
+      clearTimeout(theaterIdleTimer);
+      bodyClass('theater-idle', false);
+    }
+    const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(fn, 0);
+    raf(resizeCanvas);
+    updateModeUi();
+  }
+
+  $('btnTheater').addEventListener('click', () => setTheater(!state.theater));
+  $('btnHelp').addEventListener('click', openHelp);
+  $('btnHelpClose').addEventListener('click', closeHelp);
+  document.addEventListener?.('fullscreenchange', () => {
+    if (!document.fullscreenElement && state.theater) setTheater(false);
+    else { const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (fn) => setTimeout(fn, 0); raf(() => resizeCanvas()); }
+  });
+  document.addEventListener?.('pointermove', resetTheaterIdle, { passive: true });
+
+  // ------------------------------------------------------------ Shortcuts
+
+  const SHORTCUT_TIPS = {
+    btnPause: 'Space', btnLive: 'L', btnBack: 'Shift+←', btnBack5: '←',
+    btnFwd: '→', btnSnapshot: 'S', btnHelp: '?',
+  };
+
+  function resolveShortcut(ev, context = {}) {
+    const key = ev.key;
+    if (context.typing || context.dialog || ev.altKey || ev.ctrlKey || ev.metaKey) return null;
+    if (key === ' ' && context.button) return null;
+    if (key === ' ') return 'pause';
+    if (key === 'Escape') return 'escape';
+    if (key === '?' || (key === '/' && ev.shiftKey)) return 'help';
+    if (key === 'l' || key === 'L') return 'live';
+    if (key === 'f' || key === 'F') return 'theater';
+    if (key === 's' || key === 'S') return 'snapshot';
+    if (key === 'e' || key === 'E') return context.selection && !context.exporting ? 'export' : null;
+    if (key === 'a' || key === 'A') return 'layout:auto';
+    if (key === 't' || key === 'T') return 'today';
+    if (key === 'ArrowLeft') return ev.shiftKey ? 'back30' : 'back5';
+    if (key === 'ArrowRight') return ev.shiftKey ? 'forward30' : 'forward5';
+    if (key === '+' || key === '=') return 'zoomIn';
+    if (key === '-') return 'zoomOut';
+    if (/^[1246]$/.test(key)) return `layout:${key}`;
+    return null;
+  }
+
+  function handleEscape() {
+    if ($('helpDialog')?.open) { closeHelp(); return; }
+    if (appMenuOpen) { setAppMenu(false); return; }
+    if ($('inspector').classList.contains('open')) { setInspector(false); return; }
+    if (selectionActive()) { clearSelection(); return; }
+    if (state.theater) { setTheater(false); }
+  }
+
+  document.addEventListener?.('keydown', (ev) => {
+    if (ev.defaultPrevented) return;
+    const target = ev.target;
+    const typing = Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'))
+      || /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName || '');
+    const action = resolveShortcut(ev, {
+      typing,
+      button: target?.tagName === 'BUTTON' || target?.tagName === 'SUMMARY',
+      dialog: Boolean($('helpDialog')?.open),
+      selection: selectionActive(),
+      exporting: Boolean(exportAbort),
+    });
+    if (!action) return;
+    if (action === 'escape') { ev.preventDefault(); handleEscape(); return; }
+    if (action === 'help') { ev.preventDefault(); openHelp(); return; }
+    ev.preventDefault();
+    resetTheaterIdle();
+    switch (action) {
+      case 'pause': togglePauseAll(); break;
+      case 'live': goLiveAll(); break;
+      case 'back5': skipBackAll(SKIP_SHORT); break;
+      case 'back30': skipBackAll(SKIP); break;
+      case 'forward5': skipForwardAll(SKIP_SHORT); break;
+      case 'forward30': skipForwardAll(SKIP); break;
+      case 'snapshot': takeSnapshot(); break;
+      case 'export': doExport(...selectedExportRange()); break;
+      case 'theater': setTheater(!state.theater); break;
+      case 'today': showDay(startOfDay(Date.now())); break;
+      case 'zoomIn': zoom(0.8, currentWall()); break;
+      case 'zoomOut': zoom(1.25, currentWall()); break;
+      default:
+        if (action.startsWith('layout:')) setLayout(action.slice(7));
+    }
+  });
+
+  // ------------------------------------------------------------ Tooltips
+
+  let tipTimer = null;
+
+  function hideTip() {
+    clearTimeout(tipTimer);
+    $('tooltip').classList.add('hidden');
+  }
+
+  function showTip(element) {
+    const base = element.dataset.tip || (element.dataset.i18nTitle ? t(element.dataset.i18nTitle) : '');
+    if (!base) return;
+    const shortcut = SHORTCUT_TIPS[element.id];
+    const tip = $('tooltip');
+    tip.textContent = shortcut ? `${base} · ${shortcut}` : base;
+    tip.classList.remove('hidden');
+    const rect = element.getBoundingClientRect();
+    const width = tip.offsetWidth || 0;
+    const height = tip.offsetHeight || 0;
+    let left = rect.left + rect.width / 2;
+    left = Math.max(8 + width / 2, Math.min(window.innerWidth - 8 - width / 2, left));
+    let top = rect.bottom + 8;
+    if (top + height > window.innerHeight - 8) top = rect.top - height - 8;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${Math.max(8, top)}px`;
+  }
+
+  function tipTarget(node) {
+    return node?.closest?.('[data-tip]');
+  }
+
+  document.addEventListener?.('pointerover', (ev) => {
+    const target = tipTarget(ev.target);
+    if (!target) return;
+    clearTimeout(tipTimer);
+    tipTimer = setTimeout(() => showTip(target), 380);
+  });
+  document.addEventListener?.('pointerout', (ev) => {
+    if (tipTarget(ev.target)) hideTip();
+  });
+  document.addEventListener?.('focusin', (ev) => {
+    const target = tipTarget(ev.target);
+    if (target) showTip(target);
+  });
+  document.addEventListener?.('focusout', hideTip);
+  document.addEventListener?.('pointerdown', hideTip, { capture: true });
+
   $('dayPicker').addEventListener('change', (ev) => {
     if (!ev.target.value) return;
     const [y, m, d] = ev.target.value.split('-').map(Number);
@@ -2179,7 +2369,7 @@
 
   document.querySelectorAll('.lang-switch [data-lang]').forEach((b) => {
     b.classList.toggle('active', b.dataset.lang === window.I18N.lang);
-    b.addEventListener('click', () => window.I18N.setLang(b.dataset.lang));
+    b.addEventListener('click', () => { saveSessionSnapshot(); window.I18N.setLang(b.dataset.lang); });
   });
 
   window.addEventListener('resize', resizeCanvas);
@@ -2219,13 +2409,37 @@
     videos: () => state.tiles.map((tile) => tile.video),
   };
 
+  function saveSessionSnapshot() {
+    try {
+      sessionStorage.setItem('minivms.session', JSON.stringify({
+        layout: state.layout,
+        viewStart: state.viewStart,
+        viewEnd: state.viewEnd,
+        selStart: state.selStart,
+        selEnd: state.selEnd,
+        active: state.active,
+        channels: state.tiles.map((tile) => tile.channel),
+      }));
+    } catch (e) { /* ignore */ }
+  }
+
+  function readSessionSnapshot() {
+    try {
+      return JSON.parse(sessionStorage.getItem('minivms.session') || 'null');
+    } catch (e) { return null; }
+  }
+
   // ------------------------------------------------------------ Start
 
   (async () => {
     const now = Date.now();
+    const session = readSessionSnapshot();
     loadLayoutPreference();
+    if (session && ['auto', '1', '2', '4', '6'].includes(session.layout)) state.layout = session.layout;
     $('recAudio').checked = store.get('rec.audio') === '1';
-    setView(now - 2 * HOUR, now + 30 * MIN, { fetch: false });
+    const viewStart = Number.isFinite(session?.viewStart) ? session.viewStart : now - 2 * HOUR;
+    const viewEnd = Number.isFinite(session?.viewEnd) ? session.viewEnd : now + 30 * MIN;
+    setView(viewStart, viewEnd, { fetch: false });
     $('jumpTime').value = toLocalInput(now - MIN);
     resizeCanvas();
     updateModeUi();
@@ -2235,6 +2449,24 @@
     loadStorage();
     loadRecordingConfig();
     await Promise.all([loadChannels(), loadStreamProfiles()]);
+    if (session && Array.isArray(session.channels)) {
+      session.channels.forEach((camera, index) => {
+        const tile = state.tiles[index];
+        if (tile && state.channels.some((c) => c.camera === camera)) {
+          tile.channel = camera;
+          tile.channelTouched = true;
+          loadTilePreferences(tile);
+        }
+      });
+      state.tiles.forEach((tile) => renderTileMenu(tile));
+      const active = state.tiles[session.active];
+      if (active && active.visible) setActiveTile(active);
+      if (Number.isFinite(session.selStart) && Number.isFinite(session.selEnd) && session.selEnd > session.selStart) {
+        state.selStart = session.selStart;
+        state.selEnd = session.selEnd;
+        syncSelectionInputs();
+      }
+    }
     document.dispatchEvent(new CustomEvent('microvms:channel', { detail: { channel: activeTile().channel, previous: null } }));
     if (!activeTile().intent) goLiveAll();
     await loadRecordingSources();

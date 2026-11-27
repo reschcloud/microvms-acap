@@ -13,7 +13,7 @@ const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').repla
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
-    formatBitrate, totalBitrate, updateBandwidth, updatePing };
+    formatBitrate, totalBitrate, updateBandwidth, updatePing, resolveShortcut, setTheater };
 })();`);
 
 function xml(name, attrs = {}, children = []) {
@@ -313,6 +313,31 @@ test('the app menu opens the tools inspector and closes again', async () => {
   assert.equal(app.element('inspector').classList.contains('open'), true);
   app.element('btnInspectorClose').events.click();
   assert.equal(app.element('inspector').classList.contains('open'), false);
+});
+
+test('shortcut resolution and theater mode follow the desktop rules', async () => {
+  const app = await browser();
+  assert.equal(app.resolveShortcut({ key: ' ' }, {}), 'pause');
+  assert.equal(app.resolveShortcut({ key: ' ' }, { button: true }), null);
+  assert.equal(app.resolveShortcut({ key: 'ArrowLeft' }, {}), 'back5');
+  assert.equal(app.resolveShortcut({ key: 'ArrowLeft', shiftKey: true }, {}), 'back30');
+  assert.equal(app.resolveShortcut({ key: 'e' }, { selection: false }), null);
+  assert.equal(app.resolveShortcut({ key: 'e' }, { selection: true }), 'export');
+  assert.equal(app.resolveShortcut({ key: '?' , shiftKey: true }, {}), 'help');
+  assert.equal(app.resolveShortcut({ key: '1' }, { typing: true }), null);
+  assert.equal(app.resolveShortcut({ key: 'f' }, {}), 'theater');
+
+  app.state.channelCount = 2;
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  assert.equal(app.timelineLanes().length, 2);
+  app.setTheater(true);
+  assert.equal(app.state.theater, true);
+  assert.equal(app.timelineLanes().length, 1);
+  assert.equal(app.timelineLanes()[0].channel, 1);
+  app.setTheater(false);
+  assert.equal(app.state.theater, false);
+  assert.equal(app.timelineLanes().length, 2);
 });
 
 test('a late seek does not override returning to live', async () => {
