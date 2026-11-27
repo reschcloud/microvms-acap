@@ -350,7 +350,7 @@ test('shortcut resolution and theater mode follow the desktop rules', async () =
   assert.equal(app.resolveShortcut({ key: ' ' }, { button: true }), null);
   assert.equal(app.resolveShortcut({ key: 'ArrowLeft' }, {}), 'back5');
   assert.equal(app.resolveShortcut({ key: 'ArrowLeft', shiftKey: true }, {}), 'back30');
-  assert.equal(app.resolveShortcut({ key: 'e' }, { selection: false }), 'clip');
+  assert.equal(app.resolveShortcut({ key: 'e' }, { selection: false }), 'export');
   assert.equal(app.resolveShortcut({ key: 'e' }, { selection: true, exporting: true }), null);
   assert.equal(app.resolveShortcut({ key: 'e' }, { selection: true }), 'export');
   assert.equal(app.resolveShortcut({ key: '?' , shiftKey: true }, {}), 'help');
@@ -376,7 +376,7 @@ test('startup wires every tile, the ping and the status refresh', async () => {
   assert.ok(app.element('video').events.playing);
   assert.ok(app.element('video6').events.timeupdate);
   assert.ok(app.element('tileStream').events.change);
-  assert.ok(app.element('btnClip').events.click);
+  assert.ok(app.element('btnExport').events.click);
   assert.match(app.element('netPing').textContent, /net\.ping/);
   assert.doesNotMatch(app.element('recordingIndicator').textContent, /rec\.loading/);
 });
@@ -403,11 +403,55 @@ test('an unplayable auto profile falls back to the camera default once', async (
   assert.equal(tile.streamStatus, 'error');
 });
 
-test('the clip button selects the last minute and opens the export bar', async () => {
+test('the export button first turns on range selection, then exports the drawn range', async () => {
   const app = await browser();
-  app.element('btnClip').events.click();
-  assert.ok(app.state.selEnd - app.state.selStart === 60000);
+  const button = app.element('btnExport');
+  assert.equal(app.element('btnExportLabel').textContent, 'exp.mode');
+  button.events.click();
+  // No automatic range: the mode is on, the button waits for a selection.
+  assert.equal(app.state.selectMode, true);
+  assert.equal(app.state.selStart, null);
+  assert.equal(app.element('btnExportLabel').textContent, 'exp.saveSelection');
+  assert.equal(button.disabled, true);
   assert.equal(app.element('selectionBar').classList.contains('hidden'), false);
+  assert.equal(app.element('selRange').textContent, 'exp.selectHint');
+
+  // In export mode a drag inside a lane selects instead of panning.
+  app.setView(fixtureTime, fixtureTime + 60000, { fetch: false });
+  const view = [app.state.viewStart, app.state.viewEnd];
+  const canvas = app.element('timeline');
+  canvas.events.pointerdown({ isPrimary: true, button: 0, pointerId: 1, offsetX: 100, offsetY: 50 });
+  canvas.events.pointermove({ isPrimary: true, button: 0, pointerId: 1, offsetX: 500, offsetY: 50 });
+  canvas.events.pointerup({ isPrimary: true, button: 0, pointerId: 1, offsetX: 500, offsetY: 50 });
+  assert.deepEqual([app.state.viewStart, app.state.viewEnd], view);
+  assert.ok(app.state.selEnd - app.state.selStart > 20000);
+  assert.equal(button.disabled, false);
+
+  app.route(() => recordings(1, recording('clip', fixtureTime, fixtureTime + 60000)));
+  button.events.click();
+  await ticks();
+  assert.match(app.downloads[0], /recordingid=clip/);
+
+  // The close button leaves the mode and drops the range.
+  app.element('btnClearSel').events.click();
+  assert.equal(app.state.selectMode, false);
+  assert.equal(app.state.selStart, null);
+  assert.equal(app.element('btnExportLabel').textContent, 'exp.mode');
+  assert.equal(app.element('selectionBar').classList.contains('hidden'), true);
+});
+
+test('play/pause sits between two equal halves and held tiles without footage show no time', () => {
+  const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
+  const css = readFileSync(require.resolve('../app/html/style.css'), 'utf8');
+  const transport = html.slice(html.indexOf('class="transport"'), html.indexOf('class="controls-side end"'));
+  assert.equal((transport.match(/class="transport-half/g) || []).length, 2);
+  assert.ok(transport.indexOf('id="btnPause"') > transport.indexOf('transport-half start'));
+  assert.ok(transport.indexOf('id="btnPause"') < transport.lastIndexOf('class="transport-half"'));
+  assert.match(css, /\.transport\s*\{[^}]*grid-template-columns:\s*1fr auto 1fr/);
+  assert.match(css, /\.video-wrap\.no-recording \.clock\s*\{\s*display:\s*none/);
+  // The channel name is a tab outside the picture, not an overlay on it.
+  assert.match(css, /\.video-wrap > \.tile-label\s*\{[^}]*position:\s*static/);
+  assert.doesNotMatch(html, /jumpForm|jumpTime|btnClip/);
 });
 
 test('double-clicking a tile zooms to 1-up and back to the saved multi-view', async () => {
@@ -1010,22 +1054,6 @@ test('zooming a paused tile keeps it paused', async () => {
   app.element('tile0').events.dblclick({});
   assert.equal(app.state.tiles[0].channel, 1);
   assert.ok(app.state.tiles.slice(0, 2).every((tile) => tile.mode === 'paused' && tile.pipeline == null));
-});
-
-test('jumping to a typed time seeks every visible tile', async () => {
-  const app = await browser();
-  twoChannels(app);
-  app.state.tiles[1].channel = 2;
-  app.state.tiles[1].visible = true;
-  app.route(() => recordings(2,
-    recording('one', fixtureTime, fixtureTime + 60000, { source: '1' }),
-    recording('two', fixtureTime, fixtureTime + 60000, { source: '2' }),
-  ));
-  app.element('jumpTime').value = localInput(fixtureTime + 20000);
-  app.element('jumpForm').events.submit({ preventDefault() {} });
-  await ticks();
-  assert.equal(app.state.tiles[0].pipeline.parameters[0], 'recordingid=one');
-  assert.equal(app.state.tiles[1].pipeline.parameters[0], 'recordingid=two');
 });
 
 test('ambiguous source choices belong to their tile', async () => {

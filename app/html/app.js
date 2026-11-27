@@ -49,6 +49,7 @@
     unassignedRecordings: [],
     exportChannels: new Map(),   // channel -> export checkbox
     selectionChips: [],          // { channel, button } in the selection bar
+    selectMode: false,           // export mode: dragging the timeline selects a range
     theater: false,
     zoomReturn: null,            // saved multi-view state while a tile is zoomed to 1-up
     viewStart: 0,
@@ -990,7 +991,6 @@
     tile.rec = rec;
     tile.startWall = time;
     tile.pausedAt = null;
-    if (tile === activeTile()) $('jumpTime').value = toLocalInput(time);
     startPipeline(tile, [`recordingid=${encodeURIComponent(rec.id)}`, ...audioParams(tile, rec)],
       Math.max(0, (time - rec.start) / 1000));
   }
@@ -1558,21 +1558,30 @@
     }
   }
 
+  /**
+   * Export is a mode: "Export" turns on range selection, the same button then reads
+   * "Export selection" and becomes active once a range is drawn.
+   */
   function renderSelectionBar() {
     const bar = $('selectionBar');
     const active = selectionActive();
-    bar.classList.toggle('hidden', !active);
+    if (active) state.selectMode = true;
+    const mode = state.selectMode;
+    bar.classList.toggle('hidden', !mode);
+    canvas.classList.toggle('select-mode', mode);
+    $('btnExportLabel').textContent = t(mode ? 'exp.saveSelection' : 'exp.mode');
     state.selectionChips = [];
+    const box = $('selChannels');
+    box.replaceChildren();
     if (!active) {
-      $('btnExport').disabled = true;
+      $('selRange').textContent = mode ? t('exp.selectHint') : '';
+      $('btnExport').disabled = mode || Boolean(exportAbort);
       return;
     }
     const a = Math.min(state.selStart, state.selEnd);
     const b = Math.max(state.selStart, state.selEnd);
     $('selRange').textContent = `${fmtDateTime(a)} – ${fmtTime(b)} · ${fmtDuration(b - a)}`;
 
-    const box = $('selChannels');
-    box.replaceChildren();
     const channels = timelineChannels();
     for (const channel of channels) {
       const button = document.createElement('button');
@@ -1587,7 +1596,20 @@
       box.appendChild(button);
       state.selectionChips.push({ channel, button });
     }
-    $('btnExport').disabled = !channels.some((channel) => exportChecked(channel));
+    $('btnExport').disabled = Boolean(exportAbort) || !channels.some((channel) => exportChecked(channel));
+  }
+
+  function setSelectMode(on) {
+    state.selectMode = on;
+    if (!on && selectionActive()) { clearSelection(); return; }
+    renderSelectionBar();
+    draw();
+  }
+
+  /** The toolbar button: first turn on the range selection, then export the range. */
+  function exportButton() {
+    if (!state.selectMode) setSelectMode(true);
+    else if (selectionActive() && !exportAbort) doExport(...selectedExportRange());
   }
 
   function timelineRecordingAt(x, y, time) {
@@ -1839,7 +1861,8 @@
   canvas.addEventListener('pointerdown', (ev) => {
     if (!ev.isPrimary || ev.button !== 0) return;
     canvas.setPointerCapture(ev.pointerId);
-    const mode = ev.altKey ? 'pan' : (ev.offsetY < LANE_TOP || ev.shiftKey ? 'select' : 'pan');
+    const mode = ev.altKey ? 'pan'
+      : (state.selectMode || ev.offsetY < LANE_TOP || ev.shiftKey ? 'select' : 'pan');
     drag = {
       id: ev.pointerId, x0: ev.offsetX, view0: [state.viewStart, state.viewEnd],
       moved: false, mode, t0: tOf(ev.offsetX),
@@ -2170,7 +2193,8 @@
       request.abort();
       exportAbort = null;
       $('btnCancelExport').classList.add('hidden');
-      $('btnExport').disabled = $('btnClearSel').disabled = false;
+      $('btnClearSel').disabled = false;
+      renderSelectionBar();
     }
   }
 
@@ -2536,7 +2560,7 @@
     if (key === 'l' || key === 'L') return 'live';
     if (key === 'f' || key === 'F') return 'theater';
     if (key === 's' || key === 'S') return 'snapshot';
-    if (key === 'e' || key === 'E') return context.exporting ? null : context.selection ? 'export' : 'clip';
+    if (key === 'e' || key === 'E') return context.exporting ? null : 'export';
     if (key === 'a' || key === 'A') return 'layout:auto';
     if (key === 't' || key === 'T') return 'today';
     if (key === 'ArrowLeft') return ev.shiftKey ? 'back30' : 'back5';
@@ -2552,7 +2576,7 @@
     if (pickerOpen) { state.tiles.forEach((tile) => hideChannelPicker(tile)); return; }
     if ($('helpDialog')?.open) { closeHelp(); return; }
     if ($('inspector').classList.contains('open')) { setInspector(false); return; }
-    if (selectionActive()) { clearSelection(); return; }
+    if (state.selectMode) { setSelectMode(false); return; }
     if (state.theater) { setTheater(false); }
   }
 
@@ -2581,8 +2605,7 @@
       case 'forward5': skipForwardAll(SKIP_SHORT); break;
       case 'forward30': skipForwardAll(SKIP); break;
       case 'snapshot': takeSnapshot(); break;
-      case 'export': doExport(...selectedExportRange()); break;
-      case 'clip': selectDefaultClip(); break;
+      case 'export': exportButton(); break;
       case 'theater': setTheater(!state.theater); break;
       case 'today': showDay(startOfDay(Date.now())); break;
       case 'zoomIn': zoom(0.8, currentWall()); break;
@@ -2649,34 +2672,14 @@
   $('btnToday').addEventListener('click', () => showDay(startOfDay(Date.now())));
   $('btnZoomIn').addEventListener('click', () => zoom(0.5, state.mode === 'live' ? null : currentWall()));
   $('btnZoomOut').addEventListener('click', () => zoom(2));
-  $('jumpForm').addEventListener('submit', (ev) => {
-    ev.preventDefault();
-    const time = fromLocalInput($('jumpTime').value);
-    if (!Number.isFinite(time) || time > Date.now()) { toast(t('tl.invalidTime'), true); return; }
-    if (time < state.viewStart || time >= state.viewEnd) showDay(startOfDay(time));
-    playAtAll(time);   // one shared wall clock drives every visible tile (ADR 0006)
-  });
 
   $('expStart').addEventListener('change', selectionFromInputs);
   $('expEnd').addEventListener('change', selectionFromInputs);
   $('expPwEnable').addEventListener('change', (ev) => $('expPwRow').classList.toggle('hidden', !ev.target.checked));
-  $('btnExport').addEventListener('click', () => doExport(...selectedExportRange()));
+  $('btnExport').addEventListener('click', exportButton);
   $('btnCancelExport').addEventListener('click', () => { if (exportAbort) exportAbort.abort(); });
-  $('btnClearSel').addEventListener('click', clearSelection);
+  $('btnClearSel').addEventListener('click', () => setSelectMode(false));
 
-  /** One-click entry into export: last minute up to the playhead. */
-  function selectDefaultClip() {
-    const end = Math.min(Math.round(currentWall()), Date.now());
-    state.selStart = end - MIN;
-    state.selEnd = end;
-    if (end < state.viewStart || end - MIN > state.viewEnd) setView(end - 2 * HOUR, end + 30 * MIN);
-    syncSelectionInputs();
-    draw();
-  }
-  $('btnClip').addEventListener('click', () => {
-    if (!selectionActive()) selectDefaultClip();
-    $('btnExport').focus?.();
-  });
 
   document.querySelectorAll('.lang-switch [data-lang]').forEach((b) => {
     b.classList.toggle('active', b.dataset.lang === window.I18N.lang);
@@ -2752,7 +2755,6 @@
     const viewStart = Number.isFinite(session?.viewStart) ? session.viewStart : now - 2 * HOUR;
     const viewEnd = Number.isFinite(session?.viewEnd) ? session.viewEnd : now + 30 * MIN;
     setView(viewStart, viewEnd, { fetch: false });
-    $('jumpTime').value = toLocalInput(now - MIN);
     resizeCanvas();
     updateModeUi();
     updateBandwidth();

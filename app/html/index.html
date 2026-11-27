@@ -335,18 +335,22 @@
           </button>
         </div>
         <div class="transport">
+          <div class="transport-half start">
           <button id="btnBack" class="round" type="button" data-i18n-title="ctl.back.title">
             <svg class="icon"><use href="#ic-back-30"/></svg><span class="step">30</span>
           </button>
           <button id="btnBack5" class="round" type="button" data-i18n-title="ctl.back5.title">
             <svg class="icon"><use href="#ic-back-5"/></svg><span class="step">5</span>
           </button>
+          </div>
           <button id="btnPause" class="round main" type="button" data-i18n-title="ctl.pause.title">
             <svg class="icon"><use id="pauseIcon" href="#ic-pause"/></svg>
           </button>
+          <div class="transport-half">
           <button id="btnFwd" class="round" type="button" data-i18n-title="ctl.fwd.title">
             <svg class="icon"><use href="#ic-fwd-30"/></svg><span class="step">30</span>
           </button>
+          </div>
         </div>
         <div class="controls-side end">
           <button id="btnRetryPlayback" class="pill hidden" type="button" data-i18n="ctl.retryPlayback"></button>
@@ -370,19 +374,12 @@
           <button id="btnZoomIn" class="icon-button" type="button" data-i18n-title="tl.zoomIn"><svg class="icon"><use href="#ic-plus"/></svg></button>
         </div>
         <span class="legend">
-          <span><i class="lg continuous"></i><span data-i18n="tl.legend.record"></span></span>
+          <span><i class="lg continuous"></i><span data-i18n="tl.legend.continuous"></span></span>
           <span><i class="lg triggered"></i><span data-i18n="tl.legend.triggered"></span></span>
         </span>
         <div class="tl-group end">
-          <details class="tl-time">
-            <summary class="pill" data-i18n="tl.jumpTime.short">Uhrzeit</summary>
-            <form id="jumpForm" class="popover">
-              <label><span data-i18n="tl.jumpTime"></span><input type="datetime-local" id="jumpTime" step="1" required></label>
-              <button type="submit" class="pill accent" data-i18n="tl.jump"></button>
-            </form>
-          </details>
-          <button id="btnClip" class="pill accent" type="button" data-i18n-title="clip.title">
-            <svg class="icon"><use href="#ic-scissors"/></svg><span data-i18n="clip.btn">Clip sichern</span>
+          <button id="btnExport" class="pill accent" type="button" data-i18n-title="exp.title">
+            <svg class="icon"><use href="#ic-scissors"/></svg><span id="btnExportLabel" data-i18n="exp.mode">Export</span>
           </button>
         </div>
       </div>
@@ -406,7 +403,6 @@
             </div>
           </details>
           <button id="btnCancelExport" class="pill hidden" type="button" data-i18n="exp.cancel"></button>
-          <button id="btnExport" class="pill accent" type="button" data-i18n="exp.save">Sichern</button>
           <button id="btnClearSel" class="icon-button" type="button" data-i18n-title="close"><svg class="icon"><use href="#ic-close"/></svg></button>
         </div>
         <div id="expInfo" class="selection-info muted" role="status"></div>

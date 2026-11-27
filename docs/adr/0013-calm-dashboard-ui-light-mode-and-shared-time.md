@@ -22,14 +22,24 @@ UI, in the style of a car dashboard:
 - **Few, self-explanatory controls.** A centered transport (5 s/30 s back,
   play/pause, 30 s forward), "Save image" on the left, a red "Live" button on
   the right that only appears when it can do something. The timeline toolbar
-  keeps day navigation, zoom, a two-color legend, "Time" and "Save clip"; the
-  "whole day" button was removed (the date picker and "Today" cover it).
+  keeps day navigation, zoom, a two-color legend and "Export"; the "whole day"
+  button was removed (the date picker and "Today" cover it).
 - **Secondary information is out of the way.** Ping, bandwidth, storage, device
   name, language, appearance, and help live in a settings sheet that is
   **closed by default**. The topbar keeps the recording status chip.
-- **Tiles** show only what matters: channel name (multi-channel only), clock,
-  and one state pill (Live red, Playback blue, others neutral). Empty slots only
-  show "Choose channel". Overlays on video stay dark in both themes.
+- **Tiles** show only what matters: clock and one state pill (Live red,
+  Playback blue, others neutral). The channel name (multi-channel only) is a
+  small tab on the tile edge, outside the picture, so it never covers the
+  camera's own text overlay; the active tile's tab is blue. A tile held without
+  footage shows no timestamp. Empty slots are a themed placeholder with
+  "Choose channel". Overlays on video stay dark in both themes.
+- **Transport:** play/pause sits between two equal halves, so it is always
+  exactly centered under the tiles. The Live button always reads "Live".
+- **Export is a mode.** "Export" turns on range selection (every drag in the
+  timeline selects, Alt pans); the same button then reads "Export selection" and
+  is enabled once a range exists. × or Esc leaves the mode. There is no
+  automatic one-minute clip and no typed time jump any more. The legend calls
+  blue "Continuous".
 - **Light mode.** Appearance is Auto (follows the OS), Light, or Dark, stored as
   `minivms.theme`. An inline script in `<head>` applies it before the first
   paint. Both palettes define the same tokens; the timeline canvas re-reads its
@@ -46,7 +56,6 @@ Behavior:
   whose recording ends waits the same way instead of jumping ahead alone.
   Pause, resume and the skip buttons act on this shared clock.
 - Skipping forward never touches a tile that is live.
-- The typed jump time seeks every visible tile.
 - Ambiguous source choices belong to their tile; the card shows the active
   tile's list.
 - Audio fallback: only an RTSP rejection disables audio, for the tile and the
