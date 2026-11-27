@@ -248,6 +248,14 @@
     if (['auto', '1', '2', '4', '6'].includes(saved)) state.layout = saved;
   }
 
+  function syncLayoutControls() {
+    const select = $('layoutSelect');
+    if (select) select.value = String(state.layout);
+    document.querySelectorAll?.('#layoutSeg [data-layout]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.layout === String(state.layout)));
+    });
+  }
+
   function applyLayout() {
     const size = resolvedLayout();
     state.layoutSize = size;
@@ -282,7 +290,7 @@
       tile.el.classList.toggle('active', tile.id === state.active);
       renderTileMenu(tile);
     });
-    $('layoutSelect').value = String(state.layout);
+    syncLayoutControls();
     updateAllTileUi();
     updateModeUi(activeTile());
     resizeCanvas();
@@ -495,7 +503,7 @@
     const wanted = channels.some((c) => c.camera === saved) ? saved : channels[0].camera;
     const target = state.tiles.find((tile) => tile.visible && tile.channel === wanted);
     if (target) setActiveTile(target);
-    $('layoutSelect').value = String(state.layout);
+    syncLayoutControls();
   }
 
   async function loadStreamProfiles() {
@@ -2047,17 +2055,55 @@
     }
     snapshotFromTile(tile);
   });
-  $('layoutSelect').addEventListener('change', (ev) => {
+  function setLayout(value) {
     const wasLive = visibleTiles().length > 0
       && visibleTiles().every((tile) => tile.mode === 'live' && tile.pendingSeek == null);
     const time = activeTile().pendingSeek ?? currentWall(activeTile());
-    state.layout = ev.target.value;
+    state.layout = value;
     store.set('layout', state.layout);
     applyLayout();
     if (wasLive) goLiveAll();
     else if (Number.isFinite(time)) playAtAll(time);
     refreshRecordings();
+  }
+
+  $('layoutSelect').addEventListener('change', (ev) => setLayout(ev.target.value));
+  document.querySelectorAll?.('#layoutSeg [data-layout]').forEach((button) => {
+    button.addEventListener('click', () => setLayout(button.dataset.layout));
   });
+
+  let appMenuOpen = false;
+
+  function setAppMenu(open) {
+    appMenuOpen = open;
+    $('appMenu').classList.toggle('hidden', !open);
+    $('btnAppMenu').setAttribute('aria-expanded', String(open));
+    $('statusChip').setAttribute('aria-expanded', String(open));
+  }
+
+  function setInspector(open) {
+    const panel = $('inspector');
+    panel.classList.toggle('open', open);
+    panel.setAttribute('aria-hidden', String(!open));
+    $('btnInspector').setAttribute('aria-expanded', String(open));
+    store.set('inspector', open ? '1' : '0');
+  }
+
+  $('btnAppMenu').addEventListener('click', () => setAppMenu(!appMenuOpen));
+  $('statusChip').addEventListener('click', () => setAppMenu(!appMenuOpen));
+  $('btnInspector').addEventListener('click', () => { setAppMenu(false); setInspector(true); });
+  $('btnInspectorClose').addEventListener('click', () => setInspector(false));
+  document.addEventListener?.('pointerdown', (ev) => {
+    if (!appMenuOpen) return;
+    if (ev.target.closest?.('#appMenu, #btnAppMenu, #statusChip')) return;
+    setAppMenu(false);
+  });
+  document.addEventListener?.('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    setAppMenu(false);
+    if ($('inspector').classList.contains('open')) setInspector(false);
+  });
+  setInspector(store.get('inspector') === '1');
 
   $('dayPicker').addEventListener('change', (ev) => {
     if (!ev.target.value) return;

@@ -29,38 +29,53 @@
 
   <header class="topbar">
     <div class="brand">
-      <span class="logo">◉</span>
       <span data-i18n="app.title">Micro VMS</span>
       <span id="deviceName" class="muted"></span>
     </div>
+    <div id="layoutSeg" class="segmented" role="group" data-i18n-title="layout.label">
+      <button type="button" data-layout="auto" aria-pressed="true" data-i18n-title="layout.auto">Auto</button>
+      <button type="button" data-layout="1" aria-pressed="false" data-i18n-title="layout.1">1</button>
+      <button type="button" data-layout="2" aria-pressed="false" data-i18n-title="layout.2">2</button>
+      <button type="button" data-layout="4" aria-pressed="false" data-i18n-title="layout.4">4</button>
+      <button type="button" data-layout="6" aria-pressed="false" data-i18n-title="layout.6">6</button>
+    </div>
+    <select id="layoutSelect" class="sr-only" aria-hidden="true" tabindex="-1">
+      <option value="auto" data-i18n="layout.auto">Automatisch</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="4">4</option>
+      <option value="6">6</option>
+    </select>
     <div class="topbar-right">
+      <button id="statusChip" class="status-chip" type="button" aria-haspopup="true" aria-expanded="false">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="recordingIndicator" class="recording-indicator" role="status" data-i18n="rec.loading"></span>
+      </button>
+      <button id="btnAppMenu" class="icon-button" type="button" aria-haspopup="true" aria-expanded="false" data-i18n-title="menu.title">
+        <svg class="icon" width="18" height="18"><use href="#ic-more"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div id="appMenu" class="app-menu hidden" role="menu" data-i18n-title="menu.title">
+    <div class="app-menu-section">
+      <div id="storageStatus" class="storage muted"></div>
       <div id="netStatus" class="net-status small muted" data-i18n-title="net.title">
         <span id="netPing" data-i18n="net.ping.none">–</span>
         <span id="netRate" data-i18n="net.rate.none">–</span>
       </div>
-      <div id="storageStatus" class="storage muted"></div>
+    </div>
+    <div class="app-menu-row">
       <div class="lang-switch" data-i18n-title="lang.switch">
         <button data-lang="de">DE</button><button data-lang="en">EN</button>
       </div>
+      <button id="btnInspector" type="button" class="menu-button" data-i18n="inspector.open">Werkzeuge</button>
+      <button id="btnHelp" type="button" class="menu-button" aria-haspopup="dialog" data-i18n="help.open">Hilfe</button>
     </div>
-  </header>
+  </div>
 
   <main class="layout">
     <section class="viewer">
-      <div class="viewer-toolbar">
-        <label class="inline" id="layoutWrap">
-          <span data-i18n="layout.label">Ansicht</span>
-          <select id="layoutSelect">
-            <option value="auto" data-i18n="layout.auto">Automatisch</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="4">4</option>
-            <option value="6">6</option>
-          </select>
-        </label>
-        <span class="small muted" data-i18n="tile.focusHint"></span>
-      </div>
-
       <div id="videoGrid" class="video-grid layout-1">
         <div class="video-wrap" id="tile0" data-tile="0">
           <video id="video" muted autoplay playsinline></video>
@@ -323,7 +338,15 @@
       <div class="hint muted" data-i18n="tl.hint"></div>
     </section>
 
-    <section class="side">
+
+  </main>
+
+    <aside id="inspector" class="inspector" aria-hidden="true" aria-label="Werkzeuge">
+      <div class="inspector-head">
+        <strong data-i18n="inspector.title">Werkzeuge</strong>
+        <button id="btnInspectorClose" class="icon-button" type="button" data-i18n-title="close">×</button>
+      </div>
+      <div class="inspector-body">
       <div class="card">
         <h3 data-i18n="exp.title"></h3>
         <label><span data-i18n="exp.from"></span> <input type="datetime-local" id="expStart" step="1"></label>
@@ -393,8 +416,8 @@
           </button>
         </div>
       </div>
-    </section>
-  </main>
+      </div>
+    </aside>
 
   <div id="toast" class="toast hidden" role="status"></div>
 
