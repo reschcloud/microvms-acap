@@ -83,6 +83,7 @@
       audio: false,                // audio track requested
       muteUntilPlaying: false,     // unmute after the next playing event
       lastFrame: null,             // canvas with the last visible frame (pause/snapshot)
+      picker: null,                // immediate channel chooser for empty tiles
       pipeline: null,
       generation: 0,
       intent: null,
@@ -403,6 +404,53 @@
     updateTileAudio(tile);
   }
 
+  function ensureChannelPicker(tile) {
+    if (tile.picker) return tile.picker;
+    const picker = document.createElement('div');
+    picker.id = tileId(tile, 'tileChannelPicker');
+    picker.className = 'channel-picker hidden';
+    picker.setAttribute('role', 'listbox');
+    picker.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    tile.el.appendChild(picker);
+    tile.picker = picker;
+    return picker;
+  }
+
+  function hideChannelPicker(tile) {
+    tile.picker?.classList.add('hidden');
+  }
+
+  function openChannelPicker(tile) {
+    if (!tile || !tile.visible) return;
+    setActiveTile(tile);
+    for (const other of state.tiles) if (other !== tile) hideChannelPicker(other);
+    const picker = ensureChannelPicker(tile);
+    picker.replaceChildren();
+    const title = document.createElement('div');
+    title.className = 'channel-picker-title';
+    title.textContent = t('tile.pickChannel');
+    picker.appendChild(title);
+
+    const addChoice = (camera, text) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'channel-choice';
+      button.value = camera == null ? '' : String(camera);
+      button.textContent = text;
+      if (camera === tile.channel) button.classList.add('active');
+      button.addEventListener('click', (ev) => {
+        ev?.stopPropagation?.();
+        hideChannelPicker(tile);
+        setTileChannel(tile, camera);
+      });
+      picker.appendChild(button);
+    };
+
+    for (const channel of state.channels) addChoice(channel.camera, channelOptionText(channel));
+    if (state.layoutSize > 1) addChoice(null, t('tile.empty'));
+    picker.classList.remove('hidden');
+  }
+
   function wireTile(tile) {
     tile.el.addEventListener('pointerdown', () => setActiveTile(tile));
     tile.video.addEventListener('playing', () => onTilePlaying(tile));
@@ -436,10 +484,8 @@
     audioBtn.addEventListener('click', () => setTileAudio(tile, !tile.audio));
     const emptyCta = $(tileId(tile, 'tileEmptyCta'));
     emptyCta.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      const details = $(tileId(tile, 'tileOptions'));
-      details.open = true;
-      $(tileId(tile, 'tileChannel')).focus?.();
+      ev?.stopPropagation?.();
+      openChannelPicker(tile);
     });
     updateTileAudio(tile);
     applyTileMuted(tile);
@@ -458,6 +504,7 @@
     const prev = tile.channel;
     tile.channel = cam;
     tile.channelTouched = true;
+    hideChannelPicker(tile);
     loadTilePreferences(tile);
     renderTileMenu(tile);
     if (tile === activeTile() && cam != null) store.set('channel', String(cam));
@@ -2195,6 +2242,10 @@
     if (ev.target.closest?.('#appMenu, #btnAppMenu, #statusChip')) return;
     setAppMenu(false);
   });
+  document.addEventListener?.('pointerdown', (ev) => {
+    if (ev.target.closest?.('.channel-picker')) return;
+    state.tiles.forEach((tile) => hideChannelPicker(tile));
+  });
   document.addEventListener?.('keydown', (ev) => {
     if (ev.key !== 'Escape') return;
     setAppMenu(false);
@@ -2295,6 +2346,8 @@
   }
 
   function handleEscape() {
+    const pickerOpen = state.tiles.some((tile) => tile.picker && !tile.picker.classList.contains('hidden'));
+    if (pickerOpen) { state.tiles.forEach((tile) => hideChannelPicker(tile)); return; }
     if ($('helpDialog')?.open) { closeHelp(); return; }
     if (appMenuOpen) { setAppMenu(false); return; }
     if ($('inspector').classList.contains('open')) { setInspector(false); return; }

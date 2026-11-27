@@ -520,6 +520,13 @@ test('a manual 4-tile layout keeps empty slots and allows a free channel choice'
   assert.equal(app.element('tileEmptyCta4').classList.contains('hidden'), false);
   assert.equal(app.element('tileChannel4').options[0].textContent, 'tile.empty');
 
+  app.element('tileEmptyCta4').events.click();
+  assert.equal(app.state.tiles[3].picker.classList.contains('hidden'), false);
+  assert.ok(app.state.tiles[3].picker.options.length >= 2);
+  app.state.tiles[3].picker.options[1].events.click();
+  assert.equal(app.state.tiles[3].channel, 1);
+  assert.equal(app.state.tiles[3].picker.classList.contains('hidden'), true);
+
   const select = app.element('tileChannel2');
   select.value = '3';
   select.events.change();
