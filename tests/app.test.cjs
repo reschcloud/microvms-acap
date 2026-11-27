@@ -403,6 +403,32 @@ test('the clip button selects the last minute and opens the export bar', async (
   assert.equal(app.element('selectionBar').classList.contains('hidden'), false);
 });
 
+test('double-clicking a tile zooms to 1-up and back to the saved multi-view', async () => {
+  const app = await browser();
+  app.state.channelCount = 2;
+  app.state.channels = [{ camera: 1 }, { camera: 2 }];
+  app.state.sourceCatalog = ['1', '2'];
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  app.state.layout = '2';
+  app.applyLayout();
+  assert.equal(app.state.layoutSize, 2);
+
+  app.element('tile1').events.dblclick({});
+  assert.equal(app.state.layoutSize, 1);
+  assert.equal(app.state.tiles[0].channel, 2);
+  assert.equal(app.state.tiles[1].visible, false);
+  assert.equal(app.state.active, 0);
+  assert.ok(app.state.zoomReturn);
+
+  app.element('tile0').events.dblclick({});
+  assert.equal(app.state.layoutSize, 2);
+  assert.equal(app.state.tiles[0].channel, 1);
+  assert.equal(app.state.tiles[1].channel, 2);
+  assert.equal(app.state.active, 1);
+  assert.equal(app.state.zoomReturn, null);
+});
+
 test('a late seek does not override returning to live', async () => {
   const app = await browser();
   const query = deferred();

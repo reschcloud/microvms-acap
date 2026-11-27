@@ -6,7 +6,7 @@
             "friendlyName": "Micro VMS",
             "vendor": "Custom",
             "vendorId": "1234567890",
-            "version": "0.2.11",
+            "version": "0.2.12",
             "compatibleOsVersions": [
                 {
                     "max": "13"

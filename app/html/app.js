@@ -50,6 +50,7 @@
     exportChannels: new Map(),   // channel -> export checkbox
     selectionChips: [],          // { channel, button } in the selection bar
     theater: false,
+    zoomReturn: null,            // saved multi-view state while a tile is zoomed to 1-up
     viewStart: 0,
     viewEnd: 0,
     selStart: null,
@@ -451,8 +452,68 @@
     picker.classList.remove('hidden');
   }
 
+  function saveChannels() {
+    return state.tiles.map((tile) => tile.channel);
+  }
+
+  function toggleTileZoom(tile) {
+    if (!tile || tile.channel == null) return;
+    if (state.zoomReturn) {
+      const saved = state.zoomReturn;
+      state.zoomReturn = null;
+      const time = currentWall(activeTile());
+      const wasLive = visibleTiles().length > 0
+        && visibleTiles().every((t) => t.mode === 'live' && t.pendingSeek == null);
+      saved.channels.forEach((channel, index) => {
+        const target = state.tiles[index];
+        if (!target) return;
+        target.channel = channel;
+        target.channelTouched = true;
+        loadTilePreferences(target);
+      });
+      state.layout = saved.layout;
+      state.active = saved.active;
+      applyLayout();
+      const target = state.tiles[saved.active] || state.tiles[0];
+      if (target?.visible) setActiveTile(target);
+      if (wasLive) goLiveAll();
+      else if (Number.isFinite(time)) playAtAll(time);
+      return;
+    }
+    if (state.layoutSize <= 1) return;
+
+    const wasLive = visibleTiles().length > 0
+      && visibleTiles().every((t) => t.mode === 'live' && t.pendingSeek == null);
+    const time = tile.pendingSeek ?? currentWall(tile);
+    const manual = tile.manualRecording;
+    state.zoomReturn = {
+      layout: state.layout,
+      active: tile.id,
+      channels: saveChannels(),
+    };
+    const first = state.tiles[0];
+    const replaced = first !== tile || first.channel !== tile.channel;
+    state.layout = '1';
+    first.channel = tile.channel;
+    first.channelTouched = true;
+    first.manualRecording = manual;
+    loadTilePreferences(first);
+    state.active = 0;
+    if (replaced) stopPipeline(first);
+    applyLayout();
+    setActiveTile(first);
+    if (replaced) {
+      if (wasLive) goLive(true, first);
+      else playAt(time, { tile: first, reuseManual: true, clearOldStream: true });
+    }
+  }
+
   function wireTile(tile) {
     tile.el.addEventListener('pointerdown', () => setActiveTile(tile));
+    tile.el.addEventListener('dblclick', (ev) => {
+      if (ev?.target?.closest?.('button, summary, details, select, input, .channel-picker')) return;
+      toggleTileZoom(tile);
+    });
     tile.video.addEventListener('playing', () => onTilePlaying(tile));
     for (const type of ['loadeddata', 'timeupdate']) {
       tile.video.addEventListener(type, () => {
@@ -2243,6 +2304,7 @@
 
   $('btnSnapshot').addEventListener('click', takeSnapshot);
   function setLayout(value) {
+    state.zoomReturn = null;
     const wasLive = visibleTiles().length > 0
       && visibleTiles().every((tile) => tile.mode === 'live' && tile.pendingSeek == null);
     const time = activeTile().pendingSeek ?? currentWall(activeTile());

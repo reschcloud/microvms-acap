@@ -237,6 +237,7 @@
     let wheelTimer = null;
     for (const video of videos) {
       video.addEventListener('click', (ev) => {
+        if (ev.detail > 1) return; // double-click belongs to the tile zoom
         if (!active() || video !== ((ui() && ui().activeVideo && ui().activeVideo()) || video)) return;
         if (!$('ptzClickCenter').checked || !supports('center')) return;
         const p = videoPoint(ev);
