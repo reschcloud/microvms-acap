@@ -256,7 +256,10 @@
     return n <= 1 ? 1 : n === 2 ? 2 : n <= 4 ? 4 : 6;
   }
 
-  const resolvedLayout = () => (state.layout === 'auto' ? autoLayoutSize() : Number(state.layout) || 1);
+  /** Phones show one tile at a time with a pager, so the grid choice does not apply there. */
+  const phoneQuery = window.matchMedia?.('(max-width: 760px)');
+  const resolvedLayout = () =>
+    (state.layout === 'auto' || phoneQuery?.matches ? autoLayoutSize() : Number(state.layout) || 1);
 
   const channelOptionText = (c) =>
     multiChannel() && c.name !== t('channel.default', { n: c.camera }) ? `${c.camera}: ${c.name}` : c.name;
@@ -1526,6 +1529,8 @@
       font: cssVar('--font', 'system-ui, sans-serif'),
       nightRgb: cssVar('--tl-night-rgb', '0, 0, 0'),
       nightAlpha: Number(cssVar('--tl-night-alpha', '0.35')) || 0,
+      dayRgb: cssVar('--tl-day-rgb', '255, 200, 60'),
+      dayAlpha: Number(cssVar('--tl-day-alpha', '0')) || 0,
     });
   }
   readColors();
@@ -1764,16 +1769,27 @@
     return (1 + Math.cos(((hours - 2) / 24) * 2 * Math.PI)) / 2;
   }
 
-  /** A soft horizontal gradient: the timeline background is darker at night. */
+  /**
+   * Tint of the timeline background: dark blue towards 02:00, warm yellow towards 14:00,
+   * neutral around 08:00 and 20:00 (no muddy mix of both colors).
+   */
+  function daylightTint(ms) {
+    const s = 2 * nightness(ms) - 1;   // -1 midday … +1 midnight
+    return s >= 0
+      ? { rgb: COLORS.nightRgb, alpha: COLORS.nightAlpha * s }
+      : { rgb: COLORS.dayRgb, alpha: COLORS.dayAlpha * -s };
+  }
+
+  /** A soft horizontal gradient: blue nights, yellowish days. */
   function drawDaylight(W, H) {
     const span = state.viewEnd - state.viewStart;
-    if (!(span > 0) || !COLORS.nightAlpha) return;
+    if (!(span > 0) || !(COLORS.nightAlpha || COLORS.dayAlpha)) return;
     const gradient = ctx.createLinearGradient?.(0, 0, W, 0);
     if (!gradient?.addColorStop) return;
     const stop = (time) => {
       const offset = Math.min(1, Math.max(0, (time - state.viewStart) / span));
-      const alpha = (COLORS.nightAlpha * nightness(time)).toFixed(3);
-      gradient.addColorStop(offset, `rgba(${COLORS.nightRgb}, ${alpha})`);
+      const { rgb, alpha } = daylightTint(time);
+      gradient.addColorStop(offset, `rgba(${rgb}, ${alpha.toFixed(3)})`);
     };
     // One stop per half hour is smooth at any zoom; never more than ~400 stops.
     const step = Math.max(30 * MIN, Math.ceil(span / 400 / (30 * MIN)) * 30 * MIN);
@@ -2656,6 +2672,16 @@
     }
     snapshotFromTile(tile);
   }
+
+  // Rotating a tablet or resizing across the phone breakpoint switches between grid and pager.
+  phoneQuery?.addEventListener?.('change', () => {
+    if (resolvedLayout() === state.layoutSize) return;
+    const shared = sharedTime(activeTile());
+    applyLayout();
+    restoreSharedTime(shared);
+    refreshRecordings();
+    refreshActiveRecording();
+  });
 
   function setLayout(value) {
     // The current layout again: nothing to do (no reconnect, no lost pause).

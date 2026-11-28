@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness, connectionVia,
+    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness, daylightTint, connectionVia,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -1173,7 +1173,7 @@ test('light and dark mode follow the saved choice and refresh the timeline color
   assert.ok(html.indexOf("localStorage.getItem('minivms.theme')") < html.indexOf('style.css'));
   for (const theme of ['dark', 'light']) {
     const block = css.match(new RegExp(`:root\\[data-theme="${theme}"\\][^{]*\\{([^}]*)\\}`))[1];
-    for (const token of ['--bg', '--text', '--muted', '--accent', '--tl-bg', '--tl-future', '--tl-playhead', '--sel', '--tl-night-rgb', '--tl-night-alpha']) {
+    for (const token of ['--bg', '--text', '--muted', '--accent', '--tl-bg', '--tl-future', '--tl-playhead', '--sel', '--tl-night-rgb', '--tl-night-alpha', '--tl-day-rgb', '--tl-day-alpha']) {
       assert.match(block, new RegExp(`${token}:`), `${theme} ${token}`);
     }
   }
@@ -1379,6 +1379,11 @@ test('the timeline background is darkest at night and lightest in the afternoon'
   assert.ok(Math.abs(app.nightness(at(14))) < 1e-9);
   assert.ok(app.nightness(at(22)) > app.nightness(at(18)));
   assert.ok(app.nightness(at(6)) > app.nightness(at(10)));
+  // Blue at night, yellow by day, neutral at dawn and dusk (no mix of both).
+  assert.equal(app.daylightTint(at(2)).rgb, '0, 0, 0');
+  assert.equal(app.daylightTint(at(14)).rgb, '255, 200, 60');
+  assert.ok(Math.abs(app.daylightTint(at(2)).alpha - 0.35) < 1e-9);
+  assert.ok(app.daylightTint(at(8)).alpha < 1e-9 && app.daylightTint(at(20)).alpha < 1e-9);
   const html = readFileSync(require.resolve('../app/html/index.html'), 'utf8');
   assert.doesNotMatch(html, /statusChip|recordingIndicator/, 'no redundant recording chip in the top bar');
 });

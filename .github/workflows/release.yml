@@ -46,8 +46,11 @@ jobs:
       - name: Release anlegen
         env:
           GH_TOKEN: ${{ github.token }}
+        # Handgeschriebene Notizen aus docs/release-notes/<version>.md, sonst automatisch.
         run: |
+          notes="docs/release-notes/${TAG#v}.md"
+          if [ -f "$notes" ]; then set -- --notes-file "$notes"; else set -- --generate-notes; fi
           gh release create "$TAG" build/*.eap \
             --title "Micro VMS ACAP $TAG" \
-            --generate-notes \
+            "$@" \
             --verify-tag

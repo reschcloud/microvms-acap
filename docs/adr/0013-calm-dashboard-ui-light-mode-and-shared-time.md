@@ -37,8 +37,8 @@ UI, in the style of a car dashboard:
 - **The timeline folds itself:** one slim merged strip while every tile is live,
   the full lanes with toolbar in the archive (playback, pause, seek) and while
   exporting. A click into the strip enters the archive.
-  Its background turns a quiet dark blue towards the local night (darkest 02:00,
-  lightest 14:00); day lines are kept but never drawn on the rounded border.
+  Its background turns a quiet dark blue towards the local night (02:00) and a
+  soft yellow towards the day (14:00), neutral around 08:00 and 20:00; day lines are kept but never drawn on the rounded border.
 - **Device details** in the settings: model, serial, firmware, host name, IPv4
   and IPv6 (network API, else Network parameters, else the browser's address).
   The connection shows IPv4 or IPv6 only when the URL names an address; for a

@@ -2,7 +2,7 @@
 
 ## Build and verify
 
-- Releases are automated: `./release.sh <version>` bumps `app/manifest.json`, commits, tags and pushes; `.github/workflows/release.yml` then builds and publishes the `.eap` (and fails if tag and manifest version differ). `tests.yml` runs the Node tests on every push/PR. Pushing `build/` artifacts is not needed.
+- Releases are automated: `./release.sh <version>` bumps `app/manifest.json`, commits, tags and pushes; `.github/workflows/release.yml` then builds and publishes the `.eap` (and fails if tag and manifest version differ). `tests.yml` runs the Node tests on every push/PR. Pushing `build/` artifacts is not needed. Release notes: put them in `docs/release-notes/<version>.md` (committed before running `release.sh`); without that file the workflow falls back to `--generate-notes`.
 - Run `./build.sh` with Docker (Axis ACAP Native SDK 12.11.1, see `Dockerfile`). It replaces the entire ignored `build/` directory with the packaged app tree: `build/Micro_VMS_<version>_all.eap`, one architecture-`all` package. Edit `app/`, not `build/`.
 - The Dockerfile appends `?v=<manifest version>` to every local CSS/JS URL in `html/index.html`. ACAP serves static files with long cache headers, and without this an update keeps the old `style.css`/`app.js` in the browser (broken layout, missing features). Do not hardcode `?v=` in `app/`.
 - Run `node --test tests/app.test.cjs` with Node 22 (no npm install) for mocked VAPIX/playback tests; for shell changes use `sh -n build.sh && sh -n app/microvms && sh -n release.sh`. Dependabot tracks the Docker SDK image and the GitHub Actions, not the vendored JavaScript; the Node version in the workflows is pinned and updated by hand.
@@ -19,3 +19,4 @@
 - Dark and light theme share all rules and differ only in the tokens of `:root[data-theme="dark"|"light"]`. New colors need a token in both blocks; the timeline canvas reads `--tl-*`, `--continuous`, `--triggered`, `--sel`, `--line`, `--muted` and `--live` via `readColors()`.
 - `LANE_TOP`/`LANE_HEIGHT` in `app.js` must match the `.tl-label` heights in `style.css`.
 - Keep the main view minimal: secondary status belongs in the settings sheet (`#inspector`), see ADR 0013.
+- Phones (`max-width: 760px`) always use the auto grid with the tile pager and leave out non-core controls (grid switch, timeline zoom buttons, "today", keyboard help); the transport bar is fixed at the bottom. Short landscape screens let the picture fill the screen and scroll to the timeline.

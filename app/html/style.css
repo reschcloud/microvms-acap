@@ -34,8 +34,10 @@
 
 :root,
 :root[data-theme="dark"] {
-  --tl-night-rgb: 25, 55, 150;
-  --tl-night-alpha: .4;
+  --tl-night-rgb: 20, 40, 130;
+  --tl-night-alpha: .55;
+  --tl-day-rgb: 255, 205, 40;
+  --tl-day-alpha: .17;
   color-scheme: dark;
   --bg: #111214;
   --surface: #1b1c1f;
@@ -57,8 +59,10 @@
 }
 
 :root[data-theme="light"] {
-  --tl-night-rgb: 40, 80, 190;
-  --tl-night-alpha: .16;
+  --tl-night-rgb: 25, 50, 150;
+  --tl-night-alpha: .28;
+  --tl-day-rgb: 255, 200, 50;
+  --tl-day-alpha: .26;
   color-scheme: light;
   --bg: #f4f4f4;
   --surface: #ffffff;
@@ -571,7 +575,7 @@ label.tl-label { flex-direction: row; gap: 10px; color: var(--text); cursor: poi
 
 .inspector {
   position: fixed;
-  z-index: 50;
+  z-index: 65;                  /* above the phone transport bar */
   top: 0;
   right: 0;
   bottom: 0;
@@ -737,41 +741,95 @@ body.theater .ptz-layer { display: none !important; }
   .legend { display: none; }
 }
 
+/* Phone: one tile with a pager, the transport fixed under the thumb. Grid choice, timeline
+   zoom buttons (pinch works), "today" (Live covers it) and the keyboard help are left out. */
 @media (max-width: 760px) {
-  body { display: block; height: auto; min-height: 100%; padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
-  .layout { display: flex; flex-direction: column; }
+  body { display: block; height: auto; min-height: 100%; padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    height: 56px;
+    padding: 0 6px 0 calc(14px + env(safe-area-inset-left));
+    position: sticky;
+    top: 0;
+    z-index: 35;
+    background: var(--bg);
+  }
+  #layoutSeg, .tl-zoom, #btnToday, #btnHelp { display: none !important; }
+  .layout { display: flex; flex-direction: column; padding: 0 8px 8px; gap: 8px; }
   .viewer, .video-grid { flex: none; }
-  .topbar { grid-template-columns: auto 1fr; height: 56px; padding: 0 10px; position: sticky; top: 0; z-index: 35; background: var(--bg); }
-  .brand { display: none; }
-  .segmented button { min-width: 38px; padding: 0 8px; }
-  .layout { padding: 0 8px 8px; gap: 8px; }
   .video-grid.layout-2, .video-grid.layout-4, .video-grid.layout-6 { grid-template-columns: 1fr !important; grid-template-rows: none !important; }
   .video-grid .video-wrap { display: none !important; }
   .video-grid .video-wrap.active { display: flex !important; aspect-ratio: 16 / 9; height: auto; }
-  .tile-pager { display: flex; align-items: center; justify-content: center; gap: 16px; padding-top: 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .video-grid:not(.layout-1) .video-wrap.active video { outline: 0; }   /* only one tile: no selection frame */
+  .video-wrap > .tile-label { margin-left: 8px; max-width: calc(100% - 16px); }
+  .tile-pager { display: flex; align-items: center; justify-content: center; gap: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .tile-pager.hidden { display: none !important; }
+
   .controls {
     position: fixed;
     z-index: 60;
     left: 0;
     right: 0;
     bottom: 0;
-    padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px calc(12px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left));
     background: var(--surface);
     box-shadow: 0 -8px 32px rgba(0, 0, 0, .2);
   }
-  .mode-seg button { min-width: 0; padding: 0 10px; }
-  .transport, .transport-half { gap: 4px; }
+  .controls > .controls-side:first-child { display: none; }
+  .controls-side.end { flex: none; }
+  .transport, .transport-half { display: flex; gap: 2px; }
   .round { width: 44px; height: 44px; }
   .round.main { width: 52px; height: 52px; }
-  #btnBack { display: none; }   /* 5 s back stays; 30 s is on Shift+arrow and the timeline */
-  .tl-toolbar { gap: 8px; }
-  .tl-group.end { margin-left: 0; }
-  .tl-labels { flex-basis: 96px; }
+  #btnBack { display: none; }   /* 5 s back stays; 30 s is on the timeline */
+  .mode-seg button { min-width: 0; padding: 0 12px; }
+  /* Recovery action floats above the bar instead of squeezing the transport. */
+  #btnRetryPlayback {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 10px);
+    transform: translateX(-50%);
+    background: var(--accent);
+    color: var(--on-accent);
+    box-shadow: var(--shadow);
+  }
+  #btnRetryPlayback:active { transform: translateX(-50%) scale(.97); }
+
+  .timeline-panel { padding: 8px 10px 10px; }
+  .tl-toolbar { gap: 8px; flex-wrap: nowrap; }
+  .tl-toolbar .tl-group:first-child { min-width: 0; gap: 0; }
+  .date-field { min-width: 0; }
+  .date-field input { width: 100%; min-width: 0; padding: 0 10px; }
+  .tl-group.end { margin-left: auto; flex: none; }
+  #btnExport { padding: 0 12px; }
+  /* While exporting, the longer button label takes the place of the day arrows. */
+  .tl-toolbar:has(+ .selection-bar:not(.hidden)) :is(#btnPrevDay, #btnNextDay) { display: none; }
+  .tl-body { margin-top: 8px; gap: 8px; }
+  .tl-labels { flex-basis: 84px; }
+  .selection-bar { gap: 8px; padding: 8px 8px 8px 12px; }
+  .selection-actions { margin-left: auto; }
+  .tl-status { top: 30px; right: 6px; max-width: calc(100% - 12px); }
+
   .ptz-layer { left: 8px; right: 8px; width: auto; bottom: 8px; }
+  .inspector { padding-bottom: env(safe-area-inset-bottom); }
   .help-grid { grid-template-columns: 1fr; }
   .toast { bottom: calc(96px + env(safe-area-inset-bottom)); }
   body.theater { padding-bottom: 0; }
+}
+
+/* Phone held sideways: the picture fills the screen, the timeline is one scroll away. */
+@media (max-height: 500px) and (orientation: landscape) and (min-width: 761px) {
+  html, body { height: auto; }
+  body { display: block; }
+  .topbar { height: 52px; }
+  .layout { display: flex; flex-direction: column; }
+  .viewer { flex: none; }
+  .video-grid { flex: none; height: calc(100vh - 52px - 76px); height: calc(100dvh - 52px - 76px); }
+  .controls { padding-top: 8px; }
+  .round { width: 44px; height: 44px; }
+  .round.main { width: 52px; height: 52px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
