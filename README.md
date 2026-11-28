@@ -61,7 +61,7 @@ Voraussetzung: Docker.
 ./build.sh
 ```
 
-Ergebnis: `build/Micro_VMS_<version>_all.eap` – ein Paket für **armv7hf und aarch64** (reine Web-/Shell-App, kein Kompilieren nötig).
+Ergebnis: `build/Micro_VMS_<version>_all.eap` (Punkte der Version als Unterstriche, z. B. `Micro_VMS_0_5_2_all.eap`) – ein Paket für **armv7hf und aarch64** (reine Web-/Shell-App, kein Kompilieren nötig).
 
 Gemockte Tests ohne npm-Abhängigkeiten: `node --test tests/app.test.cjs` (Node 22).
 
