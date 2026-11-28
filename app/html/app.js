@@ -1,5 +1,6 @@
 /*
  * Micro VMS – web UI for Axis cameras (ACAP)
+ * SPDX-License-Identifier: AGPL-3.0-only
  *
  * Live:      RTSP over WebSocket (/rtsp-over-websocket) -> MSE, via media-stream-library
  * Playback:  same pipeline with recordingid + npt offset

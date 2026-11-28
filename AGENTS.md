@@ -7,6 +7,7 @@
 - The Dockerfile appends `?v=<manifest version>` to every local CSS/JS URL in `html/index.html`. ACAP serves static files with long cache headers, and without this an update keeps the old `style.css`/`app.js` in the browser (broken layout, missing features). Do not hardcode `?v=` in `app/`.
 - Run `node --test tests/app.test.cjs` with Node 22 (no npm install) for mocked VAPIX/playback tests; for shell changes use `sh -n build.sh && sh -n app/microvms && sh -n release.sh`. Dependabot tracks the Docker SDK image and the GitHub Actions, not the vendored JavaScript; the Node version in the workflows is pinned and updated by hand.
 - For an end-to-end smoke test, install the `.eap` in Axis Apps, start it, and open `/local/microvms/index.html` on the camera. The UI uses the camera's existing login and same-origin VAPIX/RTSP-over-WebSocket endpoints. A static preview needs mocked API responses; it does not verify streaming or export. Playback/export checks need a camera with recordings on configured SD/NAS storage.
+- License: AGPL-3.0-only. `LICENSE` (repo root, for GitHub) and `app/LICENSE` (packed into the `.eap` by acap-build) are identical copies; keep them in sync. New source files get an `SPDX-License-Identifier: AGPL-3.0-only` header. The vendored media-stream-library stays MIT with its own license file.
 
 ## Runtime wiring
 

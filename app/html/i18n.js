@@ -1,5 +1,6 @@
 /*
  * Micro VMS – Übersetzungen (Deutsch / English)
+ * SPDX-License-Identifier: AGPL-3.0-only
  *
  * Sprache: gespeicherte Auswahl (localStorage) > Browsersprache (de* -> Deutsch, sonst Englisch).
  * HTML: data-i18n="key" (Text), data-i18n-title="key", data-i18n-placeholder="key", data-i18n-html="key".

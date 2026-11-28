@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
 # Micro VMS – die eigentliche Logik läuft komplett im Browser (html/).
 # Dieser Prozess hält die App nur im Status "Running", damit die
 # Kamera-Oberfläche den "Öffnen"-Button anzeigt. Kein CPU-Verbrauch.

@@ -1,5 +1,6 @@
 /*
  * Micro VMS – calm, car-dashboard style UI.
+ * SPDX-License-Identifier: AGPL-3.0-only
  *
  * Rules: one text size (--fs) everywhere, hierarchy only through weight and color;
  * large quiet surfaces without borders; one accent (blue); red only for live,

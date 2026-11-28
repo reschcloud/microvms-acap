@@ -1,6 +1,7 @@
 /*
  * MkvConcat – fügt mehrere Matroska-Dateien (z. B. Axis-Exporte) im Browser
  * zu EINER Datei zusammen, ohne neu zu kodieren.
+ * SPDX-License-Identifier: AGPL-3.0-only
  *
  * - Liest die Eingaben als Stream (ReadableStream), es muss nie eine ganze Datei
  *   in den Speicher passen; die Ausgabe wird als Blob aufgebaut (der Browser

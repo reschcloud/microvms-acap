@@ -112,7 +112,7 @@ microvms-acap/
 └── app/
     ├── manifest.json        # schemaVersion 2.2.0, architecture "all", settingPage index.html
     ├── microvms             # Platzhalter-Prozess (hält die App im Status "Running")
-    ├── LICENSE
+    ├── LICENSE              # AGPL-3.0 (wird ins .eap gepackt; Kopie im Wurzelverzeichnis)
     └── html/
         ├── index.html
         ├── style.css
@@ -137,3 +137,9 @@ microvms-acap/
 - PTZ folgt dem gewählten Kanal. Falls `usergroup.cgi` fehlt, prüft die App die Berechtigung ersatzweise per Positionsabfrage für Kanal 1. Je nach Firmware kann dabei einmal ein Anmeldedialog erscheinen.
 - Mehrkanal: Nummerierte Quellen werden nur zugeordnet, wenn die Antwort Hinweise auf 0- oder 1-basierte Nummerierung liefert. `Quad` und mehrdeutige Quellen werden nicht als Aufnahmen eines nummerierten Kanals ausgegeben.
 - Die `vendorId` im Manifest ist ein Platzhalter.
+
+## Lizenz
+
+Micro VMS steht unter der [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Wer die App verändert und anderen über das Netzwerk bereitstellt, muss ihnen den Quellcode der veränderten Fassung zugänglich machen.
+
+Die mitgelieferte [media-stream-library](app/html/vendor/media-stream-library.LICENSE.txt) von Axis steht unter der MIT-Lizenz.

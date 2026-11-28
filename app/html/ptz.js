@@ -1,5 +1,6 @@
 /*
  * PTZ control for Micro VMS
+ * SPDX-License-Identifier: AGPL-3.0-only
  *
  * Shown only if
  *   1. the device supports PTZ (Properties.PTZ.PTZ=yes),
