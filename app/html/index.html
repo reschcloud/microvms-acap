@@ -446,12 +446,17 @@
         </div>
       </section>
       <section class="setting">
-        <div class="setting-title" data-i18n="settings.connection">Verbindung</div>
-        <div id="netStatus" class="net-status" data-i18n-title="net.title">
-          <span id="netPing" data-i18n="net.ping.none">Ping –</span>
-          <span id="netRate" data-i18n="net.rate.none">↓ –</span>
+        <div class="setting-title"><span data-i18n="settings.connection">Verbindung</span> <span class="muted" data-i18n="net.window">letzte 3 Minuten</span></div>
+        <div id="netStatus" class="net-graphs" data-i18n-title="net.title">
+          <div class="net-graph">
+            <span id="netPing" data-i18n="net.ping.none">Ping –</span>
+            <svg id="netPingGraph" class="spark" viewBox="0 0 300 48" preserveAspectRatio="none" aria-hidden="true"><path class="spark-area"/><path class="spark-line"/></svg>
+          </div>
+          <div class="net-graph">
+            <span id="netRate" data-i18n="net.rate.none">↓ –</span>
+            <svg id="netRateGraph" class="spark" viewBox="0 0 300 48" preserveAspectRatio="none" aria-hidden="true"><path class="spark-area"/><path class="spark-line"/></svg>
+          </div>
         </div>
-        <div id="netVia" class="muted"></div>
       </section>
       <section class="setting">
         <div class="setting-title" data-i18n="settings.storage">Speicher</div>

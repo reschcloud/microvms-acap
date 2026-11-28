@@ -7,9 +7,9 @@ process.env.TZ = 'Europe/Berlin';
 
 // Run the production browser script with a minimal DOM and mocked VAPIX/video.
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
-  window.testApp = { state, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
+  window.testApp = { state, updateModeUi, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness, daylightTint, connectionVia,
+    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness, daylightTint, sparkPath,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -40,7 +40,7 @@ function deferred() {
   return { resolve, response };
 }
 
-async function browser({ route: startRoute, session } = {}) {
+async function browser({ route: startRoute, session, mediaSource, managedMediaSource } = {}) {
   const nodes = new Map(), requests = [], messages = [], downloads = [];
   const local = new Map();
   const rectangles = [];
@@ -86,6 +86,7 @@ async function browser({ route: startRoute, session } = {}) {
   let handler = startRoute ? (url, opts) => startRoute(url, opts) ?? defaults(url) : defaults;
   const context = {
     document: doc, Date, URLSearchParams, AbortController, AbortSignal,
+    MediaSource: mediaSource === undefined ? class {} : mediaSource, ManagedMediaSource: managedMediaSource,
     localStorage: { getItem: (k) => (local.has(k) ? local.get(k) : null), setItem: (k, v) => local.set(k, String(v)) },
     sessionStorage: { getItem: () => (session ? JSON.stringify(session) : null), setItem() {} },
     DOMParser: class { parseFromString(data) { return data; } }, CustomEvent: class {},
@@ -1429,12 +1430,22 @@ test('the live strip stays on today and the archive switch leaves live', async (
   assert.equal(app.state.mode, 'live');
 });
 
-test('the connection shows the IP version when the URL names an address', async () => {
+test('the connection graphs cover three minutes and leave a gap for a failed ping', async () => {
   const app = await browser();
-  assert.equal(app.connectionVia('192.168.1.20'), 'net.via4 {"host":"192.168.1.20"}');
-  assert.equal(app.connectionVia('[2001:db8::20]'), 'net.via6 {"host":"2001:db8::20"}');
-  assert.equal(app.connectionVia('kamera.local'), 'net.viaName {"host":"kamera.local"}');
-  assert.equal(app.connectionVia(''), '');
+  const now = 1_000_000_000;
+  const samples = [
+    { t: now - 4 * 60000, v: 99 },       // outside the window: clipped left of 0
+    { t: now - 90000, v: 10 }, { t: now - 60000, v: 20 },
+    { t: now - 30000, v: null },
+    { t: now, v: 40 },
+  ];
+  const { line, area } = app.sparkPath(samples, now, 300, 48, 20);
+  assert.equal((line.match(/M/g) || []).length, 2, 'the failed ping splits the line');
+  assert.match(line, /M150\.0,/, 'a sample 90 s ago sits in the middle');
+  assert.match(line, /L300\.0,/, 'now is the right edge');
+  assert.ok(area.endsWith('Z'));
+  const empty = app.sparkPath([], now, 300, 48, 20);
+  assert.equal(empty.line + empty.area, '');
 });
 
 test('playback asks the camera for the absolute start time, not a clip offset', async () => {
@@ -1472,4 +1483,52 @@ test('the clock follows the stream time even if a camera starts at the clip star
   // The export frame centers on the playhead time: the true stream time.
   app.element('btnExport').events.click();
   assert.equal(app.state.selStart, start + 30000 - 60000);
+});
+
+test('the Live switch turns on when the last tile to go live is not the active one', async () => {
+  const app = await browser();
+  twoChannels(app);
+  app.state.tiles[1].channel = 2;
+  app.state.tiles[1].visible = true;
+  for (const tile of app.state.tiles.slice(0, 2)) { tile.mode = 'playback'; tile.streamStatus = 'connecting'; }
+  app.updateModeUi();
+  assert.equal(app.element('btnArchive').classList.contains('active'), true);
+  // No stream reaches "playing" (as on a phone without picture): the switch alone must follow.
+  app.element('btnLive').events.click();
+  await tick();
+  assert.equal(app.element('btnLive').classList.contains('active'), true);
+  assert.equal(app.element('btnArchive').classList.contains('active'), false);
+});
+
+test('iPhone: ManagedMediaSource stands in for MediaSource and AirPlay is off on the video', async () => {
+  class ManagedMediaSource {}
+  const app = await browser({ mediaSource: null, managedMediaSource: ManagedMediaSource });
+  app.goLive(true, app.state.tiles[0]);
+  assert.equal(app.win.MediaSource, ManagedMediaSource);
+  assert.equal(app.state.tiles[0].video.disableRemotePlayback, true);
+  assert.ok(app.state.tiles[0].pipeline);
+});
+
+test('a browser without any MediaSource gets a clear message instead of a timeout', async () => {
+  const app = await browser({ mediaSource: null });
+  app.goLive(true, app.state.tiles[0]);
+  assert.equal(app.state.tiles[0].streamStatus, 'error');
+  assert.equal(app.state.tiles[0].pipeline, null);
+});
+
+test('an aborted early play() (Safari) is retried when the video can play, not reported', async () => {
+  const app = await browser();
+  const tile = app.state.tiles[0];
+  let calls = 0;
+  tile.video.play = async () => {
+    calls += 1;
+    if (calls === 1) throw Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' });
+  };
+  app.goLive(true, tile);
+  await tick(); await tick();
+  assert.notEqual(tile.streamStatus, 'error');
+  assert.equal(calls, 1);
+  tile.video.events.canplay();
+  await tick();
+  assert.equal(calls, 2);
 });

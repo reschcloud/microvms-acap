@@ -867,6 +867,16 @@
       : command);
   }
 
+  /**
+   * iPhone Safari has no MediaSource, only ManagedMediaSource (iOS 17.1+). The vendored
+   * stream library calls `new MediaSource`, so alias it once. ManagedMediaSource only
+   * opens when remote playback (AirPlay) is off on the video element.
+   */
+  function mediaSourceAvailable() {
+    if (!window.MediaSource && window.ManagedMediaSource) window.MediaSource = window.ManagedMediaSource;
+    return Boolean(window.MediaSource);
+  }
+
   function startPipeline(tile, parameters, offsetSec, retryLive = true, clockStart = null) {
     stopPipeline(tile);
     const gen = tile.generation;
@@ -878,6 +888,8 @@
     tile.el.classList.remove('no-recording');
     setStreamStatus(tile, 'connecting', t('video.connecting'));
     if (!MSL?.Html5VideoPipeline) { setStreamStatus(tile, 'error', t('video.libMissing')); return; }
+    if (!mediaSourceAvailable()) { setStreamStatus(tile, 'error', t('video.noMse')); return; }
+    if (window.ManagedMediaSource && window.MediaSource === window.ManagedMediaSource) video.disableRemotePlayback = true;
     const requestedAudio = parameters.includes('audio=1');
     const fail = (msg, { reconnect = false, rejected = false } = {}) => {
       if (gen !== tile.generation) return;
@@ -957,7 +969,14 @@
           return;
         }
         pipeline.rtsp.play(offsetSec || 0);
-        return video.play();
+        return video.play().catch((err) => {
+          // The library sets video.src only with the first media data, which aborts this
+          // early play() (Safari reports it, Chrome mostly not). Start again once playable.
+          if (err?.name !== 'AbortError') throw err;
+          video.addEventListener('canplay', () => {
+            if (gen === tile.generation) video.play().catch(() => { /* the timeout reports it */ });
+          }, { once: true });
+        });
       })
       .catch((err) => {
         fail(t('video.connectFailed', { msg: err?.message || t('video.wsError') }));
@@ -1384,8 +1403,8 @@
   const AAC_MIME = 'audio/mp4; codecs="mp4a.40.2"';
 
   function audioSupported() {
-    return typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported
-      || MediaSource.isTypeSupported(AAC_MIME);
+    const source = window.MediaSource || window.ManagedMediaSource;   // iPhone: managed only
+    return !source?.isTypeSupported || source.isTypeSupported(AAC_MIME);
   }
 
   const audioEnabled = (tile) => tile.audio && !tile.audioFailed && audioSupported();
@@ -1478,25 +1497,27 @@
   function updateModeUi(tile = activeTile()) {
     updateTileBadge(tile);
     syncTimelineMode();
-    if (tile !== activeTile()) return;
+    // The transport reflects ALL visible tiles, so any tile's change re-renders it:
+    // after "Live" the last tile to switch is often not the active one.
     const tiles = visibleTiles();
-    const seeking = tile.pendingSeek != null;
-    const live = tile.mode === 'live' && !seeking;
-    const playing = tile.streamStatus === 'playing';
     const allLive = tiles.length > 0 && tiles.every((t) => t.mode === 'live' && t.pendingSeek == null);
     const allPlaying = allLive && tiles.every((t) => t.streamStatus === 'playing');
     const allPaused = tiles.length > 0 && tiles.every((t) => t.mode === 'paused' && t.pendingSeek == null);
-    $('manualSourceInfo').textContent = tile.manualRecording ? t('video.manualSource') : '';
-    $('manualSourceInfo').classList.toggle('hidden', !tile.manualRecording);
     $('pauseIcon').setAttribute('href', allPaused ? '#ic-play' : '#ic-pause');
     $('btnFwd').disabled = allLive;
-    $('btnRetryPlayback').classList.toggle('hidden', seeking || tile.mode !== 'playback' || tile.streamStatus !== 'error');
     // Live | Archive switch: a second click on Live retries a stalled live stream.
     for (const [id, on] of [['btnLive', allLive], ['btnArchive', !allLive]]) {
       $(id).classList.toggle('active', on);
       $(id).setAttribute('aria-pressed', String(on));
     }
     $('btnLive').title = allLive && !allPlaying ? t('live.retry') : '';
+    if (tile !== activeTile()) return;
+    const seeking = tile.pendingSeek != null;
+    const live = tile.mode === 'live' && !seeking;
+    const playing = tile.streamStatus === 'playing';
+    $('manualSourceInfo').textContent = tile.manualRecording ? t('video.manualSource') : '';
+    $('manualSourceInfo').classList.toggle('hidden', !tile.manualRecording);
+    $('btnRetryPlayback').classList.toggle('hidden', seeking || tile.mode !== 'playback' || tile.streamStatus !== 'error');
     const mode = live && !playing ? tile.streamStatus : seeking ? 'seeking' : tile.mode;
     if (mode !== announcedMode) {
       announcedMode = mode;
@@ -2424,6 +2445,7 @@
 
   function updateBandwidth() {
     const total = totalBitrate();
+    recordNet('rate', total);
     $('netRate').textContent = total > 0
       ? t('net.rate', { rate: formatBitrate(total) })
       : t('net.rate.none');
@@ -2442,29 +2464,61 @@
   }
 
   /**
-   * Which IP version the page uses. Only an address in the URL tells; for a host
-   * name the browser picks IPv4 or IPv6 internally and does not reveal it.
+   * Ping and bandwidth of the last three minutes, drawn as two small graphs in the
+   * settings sheet. A failed ping is stored as null and leaves a gap.
    */
-  function connectionVia(host = (typeof location !== 'undefined' && location.hostname) || '') {
-    const bare = host.replace(/^\[|\]$/g, '');
-    if (!bare) return '';
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(bare)) return t('net.via4', { host: bare });
-    if (bare.includes(':')) return t('net.via6', { host: bare });
-    return t('net.viaName', { host: bare });
+  const NET_WINDOW = 3 * MIN;
+  const netHistory = { ping: [], rate: [] };
+
+  function recordNet(kind, value, now = Date.now()) {
+    const list = netHistory[kind];
+    list.push({ t: now, v: value });
+    while (list.length && list[0].t < now - NET_WINDOW) list.shift();
+    renderNetGraph(kind, now);
+  }
+
+  /** SVG path of samples over a fixed window ending at `now`; null values break the line. */
+  function sparkPath(all, now, width, height, floor) {
+    const samples = all.filter((s) => s.t >= now - NET_WINDOW && s.t <= now);
+    const values = samples.filter((s) => s.v != null).map((s) => s.v);
+    const max = Math.max(floor, ...values) * 1.15;
+    const x = (time) => (width * (time - (now - NET_WINDOW)) / NET_WINDOW).toFixed(1);
+    const y = (v) => (height - (height * v) / max).toFixed(1);
+    let line = '', area = '', run = [];
+    const flush = () => {
+      if (!run.length) return;
+      const pts = run.length === 1 ? [{ ...run[0], t: run[0].t - 2000 }, run[0]] : run;   // a lone sample: a short dash
+      line += pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t)},${y(p.v)}`).join('');
+      area += `M${x(pts[0].t)},${height}${pts.map((p) => `L${x(p.t)},${y(p.v)}`).join('')}L${x(pts[pts.length - 1].t)},${height}Z`;
+      run = [];
+    };
+    for (const sample of samples) {
+      if (sample.v == null) flush(); else run.push(sample);
+    }
+    flush();
+    return { line, area };
+  }
+
+  const NET_GRAPH = { ping: { id: 'netPingGraph', floor: 20 }, rate: { id: 'netRateGraph', floor: 1e6 } };
+  function renderNetGraph(kind, now = Date.now()) {
+    const svg = $(NET_GRAPH[kind].id);
+    if (!svg?.querySelector) return;
+    const { line, area } = sparkPath(netHistory[kind], now, 300, 48, NET_GRAPH[kind].floor);
+    svg.querySelector('.spark-line')?.setAttribute('d', line);
+    svg.querySelector('.spark-area')?.setAttribute('d', area);
   }
 
   async function updatePing() {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     const el = $('netPing');
+    let ms = null;
     try {
-      el.textContent = t('net.ping', { ms: await pingOnce('HEAD') });
+      ms = await pingOnce('HEAD');
     } catch (e) {
-      try {
-        el.textContent = t('net.ping', { ms: await pingOnce('GET') });
-      } catch (err) {
-        el.textContent = t('net.ping.none');
-      }
+      try { ms = await pingOnce('GET'); } catch (err) { /* no answer: a gap in the graph */ }
     }
+    el.textContent = ms == null ? t('net.ping.none') : t('net.ping', { ms });
+    recordNet('ping', ms);
   }
 
   // ------------------------------------------------------------ Status
@@ -2981,7 +3035,6 @@
   document.addEventListener?.('visibilitychange', () => {
     if (document.visibilityState !== 'hidden') updatePing();
   });
-  $('netVia').textContent = connectionVia();
   setInterval(updateBandwidth, 1000);
   setInterval(updatePing, 5000);
   for (const tile of state.tiles) wireTile(tile);

@@ -41,8 +41,9 @@ UI, in the style of a car dashboard:
   soft yellow towards the day (14:00), neutral around 08:00 and 20:00; day lines are kept but never drawn on the rounded border.
 - **Device details** in the settings: model, serial, firmware, host name, IPv4
   and IPv6 (network API, else Network parameters, else the browser's address).
-  The connection shows IPv4 or IPv6 only when the URL names an address; for a
-  host name the browser does not reveal it. Hop counts are not available to a
+  The connection shows ping and incoming bandwidth as two small graphs over the
+  last three minutes; which IP version the browser uses is not visible to a page
+  for a host name, so it is not shown. Hop counts are not available to a
   web page (no traceroute, no TTL), so they are not shown. Empty slots are a themed placeholder with
   "Choose channel". Overlays on video stay dark in both themes.
 - **Transport:** play/pause sits between two equal halves, so it is always

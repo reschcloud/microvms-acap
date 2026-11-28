@@ -276,7 +276,7 @@ label input:not([type="checkbox"]), label select { width: 100%; color: var(--tex
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 
-.tile-tools { position: absolute; z-index: 4; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.tile-tools { position: absolute; z-index: 4; right: 10px; bottom: calc(var(--tab, 0px) + 10px); display: flex; gap: 6px; }
 .tile-icon {
   width: var(--control);
   height: var(--control);
@@ -372,12 +372,12 @@ button.tile-icon.audio-on { background: var(--accent); }
 .channel-choice:hover { background: var(--surface-2); }
 .channel-choice.active { background: var(--accent); color: var(--on-accent); }
 
-/* Channel name: a small tab on the tile edge, outside the picture. */
+/* Channel name: a small tab on the lower left tile edge, outside the picture. */
 .video-wrap { display: flex; flex-direction: column; background: transparent; --tab: 28px; }
 .video-wrap video { flex: 1; min-height: 0; height: auto; }
 .video-wrap > .tile-label {
   position: static;
-  order: -1;
+  order: 1;
   align-self: flex-start;
   flex: none;
   height: 28px;
@@ -390,7 +390,7 @@ button.tile-icon.audio-on { background: var(--accent); }
   gap: 8px;
   white-space: nowrap;
   overflow: hidden;
-  border-radius: 10px 10px 0 0;
+  border-radius: 0 0 10px 10px;
   background: var(--surface-2);
   color: var(--text);
   font-weight: 600;
@@ -410,15 +410,15 @@ button.tile-icon.audio-on { background: var(--accent); }
 .video-wrap[data-state="connecting"] .tile-dot,
 .video-wrap[data-state="seeking"] .tile-dot { background: var(--export); }
 .video-grid:not(.layout-1) .video-wrap.active[data-state="playback"] .tile-dot { background: #fff; }
-.video-wrap .video-msg, .video-wrap .tile-empty-cta, .video-wrap .channel-picker { top: calc(50% + var(--tab) / 2); }
+.video-wrap .video-msg, .video-wrap .tile-empty-cta, .video-wrap .channel-picker { top: calc(50% - var(--tab) / 2); }
 .video-wrap .tile-empty-cta:active { transform: translate(-50%, -50%) scale(.98); }
 /* An empty slot is a quiet placeholder in the page colors, not a black picture. */
 .video-wrap.empty::after {
   content: "";
   position: absolute;
-  top: var(--tab);
+  top: 0;
   right: 0;
-  bottom: 0;
+  bottom: var(--tab);
   left: 0;
   border: 2px dashed var(--surface-3);
   border-radius: var(--radius);
@@ -593,7 +593,12 @@ label.tl-label { flex-direction: row; gap: 10px; color: var(--text); cursor: poi
 .inspector-head strong { font-weight: 600; }
 .inspector-body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; padding: 8px 20px 24px; }
 .setting { display: flex; flex-direction: column; gap: 10px; }
-.net-status { display: flex; justify-content: space-between; gap: 12px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.setting-title .muted { font-weight: 400; }
+.net-graphs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; font-variant-numeric: tabular-nums; }
+.net-graph { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.spark { display: block; width: 100%; height: 48px; border-radius: 8px; background: var(--surface-2); clip-path: inset(0 round 8px); }
+.spark-line { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.spark-area { fill: var(--sel); stroke: none; }
 .row-button { justify-content: flex-start; width: 100%; }
 .setting:has(#deviceInfo:empty) { display: none; }
 .device-info { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; margin: 0; }
