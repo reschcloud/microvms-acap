@@ -117,7 +117,7 @@
       'tile.audio.off': 'Ton aus (stumm)',
       'tile.audio.on': 'Ton an',
       'tile.audio.unavailable': 'Audio wird von diesem Browser nicht unterstützt.',
-      'tile.audio.failed': 'Audio von der Kamera nicht akzeptiert – das Bild läuft ohne Ton weiter.',
+      'tile.audio.failed': 'Die Kamera lehnt den Ton ab ({reason}). Das Bild läuft ohne Ton weiter.',
 
       'video.reconnect': 'Verbindung getrennt – verbinde neu…',
       'video.connecting': 'Video wird geladen…',
@@ -356,7 +356,7 @@
       'tile.audio.off': 'Audio off (muted)',
       'tile.audio.on': 'Audio on',
       'tile.audio.unavailable': 'Audio is not supported by this browser.',
-      'tile.audio.failed': 'The camera rejected audio – video continues without sound.',
+      'tile.audio.failed': 'The camera rejected audio ({reason}). Video continues without sound.',
 
       'video.reconnect': 'Connection lost – reconnecting…',
       'video.connecting': 'Loading video…',

@@ -9,7 +9,7 @@ process.env.TZ = 'Europe/Berlin';
 const source = readFileSync(require.resolve('../app/html/app.js'), 'utf8').replace(/\}\)\(\);\s*$/, `
   window.testApp = { state, updateModeUi, listRecordings, selectChannel, planExport, playAt, goLive, togglePause,
     onRecordingEnded, showDay, setChannel, syncSelectionInputs, selectedExportRange, loadStorage,
-    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness, daylightTint, sparkPath,
+    refreshActiveRecording, doExport, loadChannels, skipForwardAll, setLayout, setTheme, followSharedClock, loadDeviceInfo, fmtDayTime, nightness, daylightTint, sparkPath, rtspReason,
     refreshRecordings, laneGeometry, timelineLanes, timelineChannels, exportChecked, findRecordingAtOrAfter, verifyPausedFootage, parseRecordings, recStop,
     setView, draw, createTile, activeTile, stopPipeline,
     autoLayoutSize, rankedProfiles, effectiveProfile, applyLayout,
@@ -538,6 +538,7 @@ test('audio rejected by the camera falls back to a muted video stream', async ()
   assert.equal(tile.audioFailed, true);
   assert.ok(tile.pipeline.parameters.includes('audio=0'));
   assert.match(app.element('toast').textContent, /tile\.audio\.failed/);
+  assert.equal(app.rtspReason(new Error('RTSP/1.0 400 Bad Request\r\nCSeq: 2')), '400 Bad Request');
   assert.notEqual(tile.streamStatus, 'error');
 });
 

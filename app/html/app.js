@@ -878,6 +878,12 @@
     return Boolean(window.MediaSource);
   }
 
+  /** The status line of a rejected RTSP response, e.g. "400 Bad Request". */
+  function rtspReason(err) {
+    const line = String(err?.message || err || '').split(/\r?\n/)[0].trim();
+    return line.replace(/^RTSP\/\d\.\d\s+/, '') || (err?.code ? String(err.code) : '');
+  }
+
   function startPipeline(tile, parameters, offsetSec, retryLive = true, clockStart = null) {
     stopPipeline(tile);
     const gen = tile.generation;
@@ -892,7 +898,7 @@
     if (!mediaSourceAvailable()) { setStreamStatus(tile, 'error', t('video.noMse')); return; }
     if (window.ManagedMediaSource && window.MediaSource === window.ManagedMediaSource) video.disableRemotePlayback = true;
     const requestedAudio = parameters.includes('audio=1');
-    const fail = (msg, { reconnect = false, rejected = false } = {}) => {
+    const fail = (msg, { reconnect = false, rejected = false, reason = '' } = {}) => {
       if (gen !== tile.generation) return;
       const lastWall = currentWall(tile);
       stopPipeline(tile);
@@ -912,7 +918,7 @@
         tile.muteUntilPlaying = false;
         applyTileMuted(tile);
         updateTileAudio(tile);
-        toast(t('tile.audio.failed'), true);
+        toast(t('tile.audio.failed', { reason: reason || '?' }), true);
         if (tile.mode === 'live') goLive(false, tile);
         else if (tile.mode === 'playback') playAt(lastWall, { tile, reuseManual: true });
       } else if (tile.mode === 'live' && tile.pendingSeek == null && !tile.autoFallback
@@ -956,7 +962,9 @@
       }
     };
     pipeline.rtsp.onError = (err) => {
-      fail(t('video.rtspError', { msg: err.message || err }), { rejected: true });
+      const reason = rtspReason(err);
+      if (requestedAudio) console.warn('Micro VMS: RTSP rejected a request with audio', parameters, err?.message || err);
+      fail(t('video.rtspError', { msg: reason || err?.message || err }), { rejected: true, reason });
     };
     pipeline.rtsp.onRtcp = (rtcp) => {
       if (gen !== tile.generation) return;
